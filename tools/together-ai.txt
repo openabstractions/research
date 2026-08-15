@@ -1,0 +1,24 @@
+Together AI
+=========
+
+CATEGORY: cloud API platform / model provider (hosting + fine-tuning infra)
+LICENSE: n/a closed
+
+WHAT IT IS
+  OpenAI-compatible open-source model host + fine-tuning infra + GPU clusters; the de facto open-weights backbone.
+
+ARCHITECTURE / SEAMS
+  OpenAI-compatible POST /api/v1/chat/completions (OpenAI SDK drop-in), plus separate images/audio/embeddings endpoints. No native MCP/A2A emphasis. Full post-training stack: fine-tune -> serve -> eval.
+
+STINKS
+  - Open-model-only catalog; no frontier proprietary models.
+  - Quantization zoo (FP4/FP8/INT8/etc.) creates quality/consistency questions; verbose model IDs.
+  - Serverless vs dedicated vs fine-tune vs GPU cluster = more "infra" than "API"; no single flagship.
+
+DONE GREAT
+  - Broadest open-model catalog (DeepSeek, GPT-OSS, Qwen, Kimi, GLM, Llama) plus image/video/audio.
+  - Full pipeline: BYOM, fine-tuning (LoRA/full), evals API, dedicated GPU clusters.
+  - OpenAI-compatible with per-model capability flags for tool calling/structured outputs.
+
+ABSTRACTION ANGLE
+  The de facto open-weights OpenAI-compatible backbone. Treat as drop-in OpenAI base_url for open models. Per-model capability flags (tool calling, structured outputs) reinforce that the schema is "OpenAI format" but per-model capability matrices are the real integration cost.

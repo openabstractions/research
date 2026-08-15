@@ -1,0 +1,55 @@
+NAME
+Together AI
+
+CATEGORY
+Cloud API platform / model provider (open-source model hosting + fine-tuning infra + GPU clusters)
+
+OFFICIAL SITE
+https://together.ai
+
+DOCS URL
+https://docs.together.ai (llms.txt index)
+
+API PROTOCOL / FORMAT
+- OpenAI-compatible: POST https://api.together.ai/v1/chat/completions. together Python SDK (from together import Together) and together-ai TypeScript SDK. OpenAI SDK works as drop-in.
+- Separate endpoints for images (/images/generations), audio (speech/transcriptions/translations), embeddings, plus dedicated (single-tenant) inference.
+- Source: https://docs.together.ai (Overview quickstart)
+
+KEY MODELS
+Hosts open-weight models (no frontier proprietary). Notable (from catalog):
+- DeepSeek-V4-Pro ($1.74 in / $3.48 out, 512k), DeepSeek-V4-Flash-0731 ($0.14/$0.28, 1M ctx).
+- OpenAI GPT-OSS 120B ($0.15/$0.60), GPT-OSS 20B ($0.05/$0.20).
+- Qwen3.5 397B-A17B ($2.50/$6.25), Qwen3.5 9B ($0.17/$0.25, vision), Kimi K2.5/K3, GLM-5.2, MiniMax M3, Thinking Machines Inkling ($1.00/$4.05), Llama 3.3 70B, NVIDIA Nemotron 3.
+- Image: FLUX.1/2, Imagen 4, Nano Banana (Gemini 3 Pro Image), GPT Image, Ideogram. Video: Veo 2/3, Sora 2, Kling, Wan, Seedance. Audio: Whisper, Kokoro, Cartesia Sonic 3, Orpheus. Embeddings, rerank, moderation (Llama Guard).
+- Source: https://docs.together.ai/docs/serverless/models
+
+TOOL CALLING / FUNCTION CALLING
+- OpenAI-style function calling + structured outputs (json_schema) — marked per-model in catalog (most chat models "Yes").
+- Reasoning models guide (DeepSeek-R1 etc.). JSON mode supported.
+- Edge cases: quantization variants (FP4/FP8/INT8/MXFP4/NVFP4) affect accuracy; model strings are verbose (org/ModelName).
+
+MULTIMODAL SUPPORT
+Broad via hosted open models: text, vision (image understanding), image generation, video generation, audio (TTS + STT), embeddings, rerank, moderation.
+
+PROTOCOLS / STANDARDS
+- OpenAI-compatible is the core standard. No native MCP/A2A emphasis. Code-execution sandbox, evals API (LLM judges).
+- Source: https://docs.together.ai
+
+PRICING / COST MODEL
+- Per-token (chat/vision), per-megapixel (images), per-video (video), per-1M-chars (TTS), per-audio-min (STT). Cached input pricing on some models (~1/5 to 1/6 of input).
+- Two tiers: serverless (per-token) vs dedicated endpoints (GPU-hours). Fine-tuning priced per training. BYOM (upload weights).
+- Source: https://docs.together.ai/docs/serverless/models
+
+FEATURES
+Serverless + dedicated inference, batch jobs, fine-tuning (LoRA/full), evals API, code-execution sandbox, BYOM (bring-your-own-model), GPU clusters (H100/B200), JSON/structured outputs, reasoning models, RAG guides.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- Open-model-only catalog: no GPT-5/Claude/Gemini frontier; quality ceiling = best open weights.
+- Quantization zoo (FP4/FP8/INT8/etc.) creates consistency/quality questions; verbose model IDs.
+- Price/complexity spread: dedicated vs serverless vs fine-tune vs GPU cluster is more "infra" than "API".
+- Rate limits and cold starts on some serverless endpoints; no single "flagship" model to default to.
+
+ABSTRACTION HINTS
+- Together is the de facto open-weights OpenAI-compatible backbone (like Groq, but model breadth + fine-tuning + GPU). Treat as drop-in OpenAI base_url for open models.
+- Shows the full post-training stack (fine-tune -> serve -> eval) an abstraction layer may want to expose for open-source models.
+- Function-calling/structured-outputs are advertised per-model (capability flags), reinforcing that "OpenAI format" is the schema but per-model capability matrices are the real integration cost.

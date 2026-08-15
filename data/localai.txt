@@ -1,0 +1,58 @@
+NAME
+LocalAI
+
+CATEGORY
+Local inference engine / model runner (multi-backend inference platform / "AI engine")
+
+OFFICIAL SITE
+https://localai.io
+
+GITHUB REPO
+https://github.com/mudler/LocalAI
+
+LICENSE
+MIT
+
+WHAT IT DOES
+Open-source, drop-in OpenAI/Anthropic/ElevenLabs-compatible API engine that runs any model (LLMs, vision, voice, image, video) on any hardware (CPU or GPU) by orchestrating pluggable "backend" engines; self-hosted alternative to cloud AI APIs.
+
+TECHNICAL ARCHITECTURE
+- Written in Go (core `core/`, `pkg/`, `backend/`, HTTP in `core/http`); small central core that spawns/manages backend processes.
+- Composable backend model: each backend wraps a best-in-class engine (llama.cpp, vLLM, SGLang, transformers, whisper.cpp, diffusers, MLX, stable-diffusion, plus dozens of native C/C++/ggml engines the project maintains) distributed as separate OCI container images, pulled on demand when a model needs them.
+- Model config is YAML (`gallery/`, model catalog at models.localai.io); models downloaded from Hugging Face / Ollama registry / OCI / URL.
+- Distributed mode: horizontal scaling with PostgreSQL + NATS, VRAM-aware smart routing, autoscaling, P2P inference, layer-split (ds4) inference.
+
+API / PROTOCOLS IT SPEAKS
+- Drop-in OpenAI API compatibility (chat/completions, embeddings, audio, images, models, functions/tools), plus Anthropic Messages API and ElevenLabs (TTS) API — same endpoints, multiple providers.
+- Also Realtime API (speech-to-speech, WebRTC), Ollama drop-in API, gRPC (in some backends), and an internal backend-to-core protocol.
+- Local REST endpoints for /v1/*, /models, model install/remove, agent endpoints.
+
+KEY FEATURES
+- 60+ backends (llama.cpp, vLLM, SGLang, transformers, whisper.cpp, diffusers, MLX, plus native ggml C/C++ engines: parakeet.cpp, vllm.cpp, TTS/ASR/face/voice engines, etc.), installable on the fly from a Backend Gallery (OCI images).
+- Full modality coverage behind one API: text, vision, image gen, TTS, ASR/STT, video gen, music, rerankers, embeddings, object detection.
+- Multi-user: API key auth, per-user quotas, RBAC, OIDC; usage metrics; fine-tuning (TRL -> GGUF export) and on-the-fly quantization.
+- Built-in agentic framework: autonomous agents with tool use, RAG, MCP, skills, SSE streaming; MCP Apps; Agent Hub.
+- Hardware: NVIDIA (CUDA 12/13), AMD (ROCm), Intel (oneAPI/SYCL), Apple Silicon (Metal/MLX), Vulkan, Jetson, CPU-only.
+
+MODEL DOWNLOAD MECHANISM
+- `local-ai run` resolves models from: built-in gallery (models.localai.io), Hugging Face (`huggingface://...`), Ollama OCI registry (`ollama://...`), generic OCI/Docker registry (`oci://...`), or a YAML config URL. Models cached locally; backends auto-downloaded per model. Formats: GGUF, Safetensors, and engine-specific formats (MLX, diffusers, etc.).
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- Complexity: large surface area (many backends, distributed mode, agents) means a steep learning curve and moving fast/breaking changes; docs can lag features.
+- Heavyweight: pulls big backend OCI images per model; first-run latency and disk footprint are notable complaints.
+- Multi-backend consistency is uneven — features/bugs vary by backend (llama.cpp vs vLLM parity is a stated ongoing effort).
+- Historically the macOS DMG is unsigned (issue #6268); Docker is the most reliable path.
+- Smaller core team relative to scope; some native backends are young and bit-exact/parity claims are still being hardened.
+
+TOOL CALLING / MCP SUPPORT
+- OpenAI-compatible tools/functions API for function calling; structured output; tool streaming; reasoning parsing.
+- MCP: first-class — built-in MCP support for agents (Oct 2025), MCP Apps + client-side with tool streaming, MCP servers loadable by the agent framework. Strong, ahead of most local runners.
+
+MULTIMODAL SUPPORT
+- The strongest of the local runners: text, vision (Vision API), image generation, TTS/audio generation, ASR/STT, video generation, music, speaker/face recognition, object detection, rerankers — all behind one OpenAI/Anthropic-compatible API. WebRTC realtime audio.
+
+RESOURCE MANAGEMENT
+- Dynamic Memory Resource reclaimer (auto-free idle model memory), automatic multi-GPU model fitting, VRAM-aware smart routing across nodes, autoscaling in distributed mode, prompt caching on by default. Per-user quotas. Backends unloaded/reclaimed automatically; better than most peers at shared/multi-app resource handling (has explicit reclaim + routing).
+
+ABSTRACTION HINTS
+- Its defining abstraction: a thin Go "core" that is API-compatibility layer + scheduler + model store, with each inference engine isolated as a swappable OCI-image backend behind a defined interface — an explicit, documented "build your own backend in any language" seam. The OpenAI/Anthropic/ElevenLabs drop-in compatibility is itself the unified interface. YAML model configs decouple "which model + params" from "which backend." This is the closest existing analog to a true multi-provider abstraction layer.

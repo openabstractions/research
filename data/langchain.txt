@@ -1,0 +1,56 @@
+NAME
+LangChain
+
+CATEGORY
+workflow/orchestration (framework/library)
+
+OFFICIAL SITE
+https://www.langchain.com (docs: https://docs.langchain.com/oss/python/langchain/overview)
+
+GITHUB REPO
+Python: https://github.com/langchain-ai/langchain
+JS/TS: https://github.com/langchain-ai/langchainjs
+
+LICENSE
+MIT (repo LICENSE; PyPI classifiers MIT).
+
+WHAT IT DOES
+The most widely used framework for building LLM applications and agents: chain interoperable components (models, retrievers, tools, memory) and third-party integrations through standardized interfaces.
+
+TECHNICAL ARCHITECTURE
+- Python and JS/TS libraries (no built-in server; you embed it in your app).
+- Core abstractions: "Runnables" via LCEL (LangChain Expression Language) — every component implements invoke/stream/batch; chains compose with the `|` operator; Pydantic-typed inputs/outputs.
+- Component categories: chat/embedding models, retrievers + vector stores, document loaders/splitters, tools/toolkits, memory, output parsers, agents.
+- Model integrations split into per-provider packages (langchain-openai, langchain-anthropic, ...).
+- Agent abstractions largely superseded by LangGraph; classic `AgentExecutor`/ReAct deprecated/moved.
+
+MODEL FORMAT / ENGINES SUPPORTED
+Model-agnostic: a common ChatModel/Embeddings interface over 100s of providers (OpenAI, Anthropic, Google, Mistral, Llama, local via Ollama, etc.). No local model loading itself.
+
+API / PROTOCOLS IT SPEAKS
+- It is a library: consumed via Python/TS code, not an HTTP API.
+- Pairs with LangSmith (SaaS) for tracing/eval; MCP via langchain-mcp-adapters.
+- Integrations speak each provider's HTTP/gRPC SDK under the hood.
+
+KEY FEATURES
+- LCEL runnable composition; chains and pipelines.
+- RAG building blocks: loaders, splitters, embeddings, vector stores, retrievers.
+- Tools/toolkits + tool calling; structured output via Pydantic.
+- Memory, prompt templates, output parsers.
+- Ecosystem: Deep Agents (higher-level planning/subagents package), LangGraph (orchestration), LangSmith (observability/eval/deploy).
+
+TOOL CALLING / MCP SUPPORT
+Native tool-calling (bind_tools) and MCP adapter support (langchain-mcp-adapters to consume MCP servers as tools). Not itself an MCP server.
+
+MULTIMODAL SUPPORT
+Supports multimodal chat models (image/audio input) via the ChatModel interface, but is not a generation engine — no image/video/audio diffusion. Orchestration/text focus.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- Abstraction churn: frequent breaking changes and deprecations; API has shifted repeatedly (agents, chains, v0.1->v0.2->1.x, LCEL).
+- "Over-abstraction" criticism: many layers hide behavior and make debugging harder.
+- Agent story fragmentation: classic agents deprecated in favor of LangGraph, confusing newcomers.
+- Integration breadth = maintenance burden; some integrations lag or break on provider changes.
+- Not opinionated enough for production defaults (retry, eval, state) — pushes users to LangSmith/LangGraph (commercial upsell).
+
+ABSTRACTION HINTS
+The canonical LLM abstraction layer: it standardized BaseChatModel / Embeddings / Retriever / Tool / Runnable interfaces that the whole ecosystem now mimics. Clean points: the Runnable/LCEL interface (uniform invoke/stream/batch, Pydantic typing) and provider-adapter pattern. Weak points: the interfaces are "leaky" (each provider's quirks surface), and the higher-level layers (chains/agents) have been repeatedly rebuilt — the abstraction is stable at the bottom, volatile at the top.

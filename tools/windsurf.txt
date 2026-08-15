@@ -1,0 +1,26 @@
+WINDSURF (DEVIN DESKTOP)
+=========
+
+CATEGORY: agentic coding IDE
+LICENSE: closed-source / proprietary
+
+WHAT IT IS
+  AI IDE (VS Code fork) built around the Cascade agent; post-Cognition-acquisition rebranded "Devin Desktop" — a multi-agent command center for local + cloud agents.
+
+ARCHITECTURE / SEAMS
+  Closed-source Electron IDE. Post-acquisition it becomes multi-agent: runs Devin Local/Cloud, Codex, Claude Agent, OpenCode, and Cascade, interop via the Agent Client Protocol (ACP). Context via "Fast Context" (instant exact retrieval) + LSP (rust-analyzer, clangd, gopls, Pyright) + MCP; "Spaces" share context + git worktrees across agents. Tool execution via MCP client (Slack, Linear, Figma, Sentry, etc.) + language-server integration + ACP. Clean seams: ACP (agent/model interop), MCP (tools), LSP + Fast Context (context), Spaces (shared context/worktrees). Cascade agent loop is proprietary but ACP decouples it.
+
+STINKS
+  - Major product churn — rebranded to Devin Desktop after Cognition acquisition (migration confusion)
+  - Cascade model lock-in; closed source, no self-host/audit
+  - Confusing "flex credits" pricing + aggressive credit consumption
+  - Fast Context / Cascade internals proprietary
+
+DONE GREAT
+  - ACP as the standout seam — external agents (OpenCode, Claude Agent, Codex) plug in over a protocol
+  - Fast Context: instant exact-retrieval codebase context
+  - Multi-agent command center with Spaces + Kanban view
+  - True agent/model interoperability rather than single-model lock-in
+
+ABSTRACTION ANGLE
+  Owns the IDE + multi-agent orchestration layer. Project context = Fast Context + LSP + shared Spaces — a universal standard could absorb Fast-Context-style retrieval and Spaces-style shared context as a context contract. Tool execution = MCP + ACP; ACP is the leading model for "agent interop" that a minimal standard should build on. The fact that a closed IDE exposes external agents over ACP validates the interop seam.

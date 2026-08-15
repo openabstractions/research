@@ -1,0 +1,58 @@
+NAME
+DeepSeek
+
+CATEGORY
+Cloud API platform / model provider (closed-serve of open-weight DeepSeek models)
+
+OFFICIAL SITE
+https://deepseek.com / https://platform.deepseek.com
+
+DOCS URL
+https://api-docs.deepseek.com
+
+API PROTOCOL / FORMAT
+- Dual-format: OpenAI-compatible AND Anthropic-compatible. OpenAI base_url https://api.deepseek.com ; Anthropic base_url https://api.deepseek.com/anthropic. Also supports OpenAI Responses API.
+- Native endpoint /chat/completions. Can be driven by the OpenAI SDK or Anthropic SDK by changing base_url.
+- Non-stream + stream supported. Extra params via extra_body (e.g. thinking).
+- Source: https://api-docs.deepseek.com (Quick Start), /guides/anthropic_api, /guides/responses_api
+
+KEY MODELS
+- deepseek-v4-flash (DeepSeek-V4-Flash-0731) and deepseek-v4-pro (DeepSeek-V4-Pro-0813). Latest accessed via the simple aliases deepseek-v4-flash / deepseek-v4-pro.
+- Context 1M tokens; max output up to 384K. Thinking mode supported (non-thinking + thinking; thinking is default).
+- Features both support: JSON output, tool calls, Responses API, Anthropic API, chat prefix completion (beta), FIM completion (beta, non-thinking only).
+- Source: https://api-docs.deepseek.com/quick_start/pricing
+
+TOOL CALLING / FUNCTION CALLING
+- OpenAI-style tools/function calling (type:function, name, parameters JSON Schema), tool_calls + role:tool messages with tool_call_id.
+- Thinking mode supports tool calls (since V3.2 lineage).
+- `strict` mode (Beta): set strict:true per function; requires base_url https://api.deepseek.com/beta. Server validates JSON Schema; enforces that all object properties are `required` and `additionalProperties:false`. Supported types: object, string (pattern/format email|hostname|ipv4|ipv6|uuid — NO minLength/maxLength), number/integer (const/min/max/exclusiveMin/Max/multipleOf), array (NO minItems/maxItems), enum, anyOf, $ref/$def.
+- Edge case: reasoning models return `reasoning_content` alongside `content` — must be preserved and not passed back in subsequent turns.
+- Sources: https://api-docs.deepseek.com/guides/tool_calls, /guides/thinking_mode
+
+MULTIMODAL SUPPORT
+Text only via the API (no image/audio/video input or output). DeepSeek-OCR exists as a separate hosted model elsewhere (e.g. Vertex/Together), not on the core API.
+
+PROTOCOLS / STANDARDS
+- No native MCP/A2A. DeepSeek positions as a drop-in backend for agent tools: Claude Code, GitHub Copilot, OpenCode, etc. "DeepSeek Harness" for agent harness devs.
+- Being OpenAI+Anthropic dual-compatible is DeepSeek's key ecosystem move.
+
+PRICING / COST MODEL
+- Per-token, very cheap, with automatic context (KV) caching (cache-hit rates ~1/50th of miss). Prepaid balance.
+- Current: v4-flash $0.14/M in (miss) / $0.0028 cache hit / $0.28 out; v4-pro $0.435 / $0.003625 / $0.87.
+- PEAK/OFF-PEAK pricing announced effective 2026-08-16 (off-peak = 50% of peak; peak 01:00–04:00 & 06:00–10:00 UTC). v4-pro off-peak $0.66 in / $1.98 out; peak $1.32 / $3.96.
+- Concurrency limits: 2500 (flash), 500 (pro). Source: https://api-docs.deepseek.com/quick_start/pricing
+
+FEATURES
+Thinking mode (default), automatic context caching (deep discount, no setup), JSON mode, tool calls (+ strict mode), chat prefix completion (beta), FIM completion (beta), Responses API, Anthropic API, high concurrency tiers.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- No native multimodal (big gap vs OpenAI/Anthropic/Gemini).
+- reasoning_content must be specially handled in multi-turn; naive OpenAI-SDK clients drop/misuse it.
+- strict mode friction: needs separate /beta base_url; disallows optional fields and min/max length; incomplete JSON-schema subset.
+- Peak/off-peak pricing complicates cost prediction; concurrency limits low on pro (500).
+- No fine-tuning on the hosted API; limited ecosystem/enterprise features.
+
+ABSTRACTION HINTS
+- DeepSeek mainstreamed "one model, both OpenAI and Anthropic endpoints" — evidence that the ecosystem has two canonical formats and providers now polyglot.
+- reasoning_content is the canonical example of the "reasoning/thinking" normalization problem: OpenAI = reasoning tokens/effort, Anthropic = thinking blocks, DeepSeek = reasoning_content field.
+- strict mode shows the JSON-schema-constrained tool-calling trend (mirrors OpenAI structured outputs); abstraction layers need per-provider schema-subset awareness.

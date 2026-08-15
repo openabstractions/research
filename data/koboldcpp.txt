@@ -1,0 +1,56 @@
+NAME
+KoboldCpp
+
+CATEGORY
+Local inference engine / model runner (all-in-one binary + bundled KoboldAI Lite UI)
+
+OFFICIAL SITE
+https://github.com/LostRuins/koboldcpp (no separate site; note koboldcpp.com is a phishing scam per README)
+
+GITHUB REPO
+https://github.com/LostRuins/koboldcpp
+
+LICENSE
+AGPL-3.0 (KoboldCpp code and bundled KoboldAI Lite UI). Bundled upstream libraries (ggml, llama.cpp, stable-diffusion.cpp, TTS.cpp, etc.) are MIT. Effectively AGPL-3.0 for the project as shipped.
+
+WHAT IT DOES
+Single-file, zero-install executable that runs GGML/GGUF models with a bundled KoboldAI Lite web UI (roleplay/writing/chat modes), plus many extra modalities (image gen, TTS, STT, vision, video, music) and multiple compatible API endpoints.
+
+TECHNICAL ARCHITECTURE
+- Fork of llama.cpp with a large Python launcher/UI layer (koboldcpp.py) packaged via PyInstaller into one self-contained binary; core inference is C/C++ (ggml/llama.cpp, CuBLAS/HIPBLAS/Vulkan/Metal).
+- Bundles additional C/C++ engines: stable-diffusion.cpp (image gen), TTS.cpp/Qwen3TTS/Kokoro/Parler/Dia (TTS), Whisper (STT), AceStep.cpp (music), plus multimodal vision (mmproj).
+- Serves a built-in web UI (KoboldAI Lite) and multiple HTTP API surfaces from one process (default http://localhost:5001).
+
+API / PROTOCOLS IT SPEAKS
+- Native KoboldAI/KoboldCpp API (legacy /api and newer /api endpoints, documented at /api).
+- OpenAI-compatible API at /v1 (chat/completions).
+- Compatibility shims for many services on one port: KoboldCppApi, OpenAiApi, OllamaApi, A1111ForgeApi (image), ComfyUiApi, WhisperTranscribeApi, XttsApi, OpenAiSpeechApi.
+- Backends selectable per-endpoint; MCP server endpoint for tool calling.
+
+KEY FEATURES
+- One file, zero install; Windows/macOS/Linux binaries + Docker + Colab/RunPod + Android (Termux) + Raspberry Pi.
+- Broad modality: text, image gen/edit (SD1.5/SDXL/SD3/Flux/Qwen-Image/Z-Image/Klein), video gen (WAN 2.2), STT (Whisper), TTS, music, vision.
+- KoboldAI Lite UI with character cards, world info, memory, author's note, scenarios, samplers, regex, websearch, RAG (TextDB).
+- Tool calling + MCP server support; `--usecuda`/`--usevulkan` GPU, `--gpulayers` offload, `--contextsize` tuning.
+
+MODEL DOWNLOAD MECHANISM
+- No built-in registry: users download GGUF files manually from Hugging Face (e.g., bartowski, KoboldAI repos) or use conversion tools (convert-hf-to-gguf.py + quantize). Safetensors for image models (CivitAI/HF). Formats: GGUF/GGML (text, backward-compatible with all past models), Safetensors (image), Whisper/TTS/mmproj auxiliary files.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- AGPL-3.0 license is a real commercial red flag (copyleft/network-copyleft), unlike MIT/Apache peers.
+- Single-author-heavy project; releases are frequent but can regress; docs are wiki-heavy and somewhat disorganized.
+- Windows Defender/AV false positives on the PyInstaller binary are a recurring complaint.
+- AMD support is second-class (Vulkan recommended; ROCm via third-party fork); CUDA out-of-the-box is NVIDIA-only.
+- Multi-API compatibility shims can be imperfect/incomplete vs the real services they emulate; huge feature surface means some modalities are less polished than dedicated tools.
+
+TOOL CALLING / MCP SUPPORT
+- Tool calling supported (function calling via OpenAI-compat /v1 and native API); MCP server support is listed as a feature (can expose tools via MCP). Good, especially for a niche runner; used heavily by the roleplay/agent community.
+
+MULTIMODAL SUPPORT
+- Very broad for a local runner: vision (image recognition via mmproj), image generation/editing, video gen, STT (Whisper), TTS, music gen. Covers more modalities than Ollama/LM Studio/llama.cpp out of the box.
+
+RESOURCE MANAGEMENT
+- Manual: `--gpulayers` layer offload to VRAM, `--contextsize`, `--ropeconfig`, `--blasbatchsize`; smart context (auto KV reduction); quantization choice. Single process; models loaded one at a time (mostly), manual unload. No cross-app coordination; CPU+GPU partial offload supported. Concurrency limited (a few parallel slots).
+
+ABSTRACTION HINTS
+- Clean layering: C/C++ inference engines (llama.cpp/ggml + sibling .cpp engines) are exposed via a shared Python "expose" layer (expose.cpp/h, model_adapter.cpp/h, gpttype_adapter.cpp) that adapts many model types and API formats. The multi-API endpoint layer (Kobold/OpenAI/Ollama/A1111/ComfyUI/Whisper/Xtts) is itself an explicit compatibility-adapter seam worth studying for a unified abstraction. Backend modality routing (text vs image vs TTS vs STT engines on one port) is a ready-made multi-modal provider boundary.

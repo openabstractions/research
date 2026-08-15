@@ -1,0 +1,54 @@
+NAME
+TensorRT-LLM
+
+CATEGORY
+runtime (NVIDIA GPU-specific LLM/VLM inference compiler + runtime)
+
+OFFICIAL SITE
+https://nvidia.github.io/TensorRT-LLM/
+Docs: https://nvidia.github.io/TensorRT-LLM/
+
+GITHUB REPO
+https://github.com/NVIDIA/TensorRT-LLM
+
+LICENSE
+Apache License 2.0
+
+WHAT IT DOES
+Compiles and serves LLMs and visual-gen models on NVIDIA GPUs with specialized CUDA kernels, quantization, parallelism, and scheduling to maximize tokens/sec and minimize latency/cost.
+
+TECHNICAL ARCHITECTURE
+- Historically a graph-based "build then run" compiler (define model with a Python DSL -> compile to a "TensorRT engine" -> run via Python/C++ runtime). Since v1.0 it is architected natively on PyTorch, with a high-level Python LLM API and PyTorch-native model definitions that can be customized in pure PyTorch.
+- Components: custom CUDA kernels (attention, GEMM, MoE, quantization), an execution runtime (KV cache manager, in-flight batching / paged attention, CUDA-graph capture, schedulers), and parallelism strategies (tensor/pipeline/context/expert/data parallelism, DWDP) for multi-GPU and multi-node (NVL72 racks).
+- Serves via the Triton Inference Server backend and integrates with NVIDIA Dynamo for datacenter-scale disaggregated serving; C++ runtime available for high-performance orchestration.
+- Language: Python API on a C++/CUDA core; PyTorch-native architecture.
+
+FORMATS / STANDARDS IT DEFINES
+- TensorRT "engine" files (compiled, GPU/arch-specific; support weight-stripped engines where one engine + separate weights target many GPUs).
+- Checkpoint format (trtllm-build checkpoints) with config.json; quantized checkpoint formats (FP8/FP4/INT4-AWQ etc.).
+- No cross-vendor standard: engines and optimizations are NVIDIA-specific.
+
+API / PROTOCOLS
+- Python LLM API (LLM(), generate()), plus `trtllm-serve`, `trtllm-bench`, `trtllm-eval` CLI tools.
+- OpenAI-compatible serving endpoints via Triton/NVIDIA Dynamo; agentic-workload optimizations (disaggregated prefill/decode).
+
+KEY FEATURES
+- State-of-the-art throughput/latency on NVIDIA GPUs (world-record DeepSeek-R1 inference; 1000+ TPS/user on Blackwell).
+- Quantization (FP8, FP4, INT4), speculative decoding, KV-cache reuse, sparse attention, LoRA, MTP, MoE expert parallelism, in-flight batching, disaggregated serving.
+- Day-0 support for major open models (Llama, DeepSeek, GPT-OSS, EXAONE, etc.).
+
+ADOPTION STATUS
+- De-facto standard for production LLM serving on NVIDIA GPUs at the high end, used by Databricks, Microsoft Bing, AWS SageMaker LMI, Baseten, BentoML, Modal, NVIDIA NIM. 14.4k GitHub stars.
+- Strongest for throughput-critical, large-scale, GPU-dense deployments; weaker on non-NVIDIA or heterogeneous hardware (NVIDIA-only by design).
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- NVIDIA-only: zero portability to AMD/Intel/TPU; locks you into NVIDIA hardware.
+- Compilation is GPU-architecture-specific; engines don't move across GPU generations — recompilation per arch, and build times are long.
+- Historically complex build-then-run workflow (simplified by the newer PyTorch-native LLM API, but the engine/checkpoint build step is still heavy).
+- Rapid churn, many legacy paths, deprecations (3-month policy), and telemetry on by default (opt-out).
+- Ops/build complexity: precompiled wheels/containers are version-pinned to exact CUDA/PyTorch/TensorRT combinations; hard to build from source.
+
+ABSTRACTION HINTS
+- Won by competing on raw performance within a vertical, not on portability — the opposite strategy to ONNX. Lesson: a runtime can beat a "portable" standard by going all-in on one hardware target's compiler/kernel optimizations; standards lose when a vendor integration is 3-10x faster.
+- Design teaching: the split between a Python "define" layer and a compiled "engine" mirrors a compile-then-run abstraction; the cost is that the compiled artifact is the portability/versioning pain point.
+- Its move "architected on PyTorch" shows the value of riding an existing ecosystem runtime rather than a bespoke DSL — developer familiarity wins over purity.

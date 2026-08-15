@@ -1,0 +1,61 @@
+NAME
+Anthropic (Claude)
+
+CATEGORY
+Cloud API platform / model provider (frontier closed models)
+
+OFFICIAL SITE
+https://anthropic.com / https://claude.com / https://claude.ai
+
+DOCS URL
+https://platform.claude.com/docs (formerly docs.anthropic.com; API ref at /docs/en/api/overview)
+
+API PROTOCOL / FORMAT
+- Native "Anthropic Messages format" — the #2 ecosystem standard. Messages API: request = {model, system, messages[] (role user/assistant), max_tokens, tools, thinking}; response = content blocks (text / tool_use / thinking), stop_reason.
+- Also: Claude Managed Agents (higher-level async harness). No native OpenAI-compat endpoint (compat is via Bedrock/Vertex or third-party shims).
+- SDKs: official Python/TypeScript + many others. Deployments: Claude API (1st party), Amazon Bedrock, Google Cloud (Vertex), Microsoft Foundry, "Claude Platform on AWS" (CCU billing).
+- Sources: https://platform.claude.com/docs/en/intro, /docs/en/about-claude/models/overview
+
+KEY MODELS
+- Claude Fable 5 (claude-fable-5) — most capable, "long-running agents", adaptive thinking always-on. $10/$50 per MTok.
+- Claude Opus 5 (claude-opus-5) — agentic coding/enterprise. $5/$25.
+- Claude Sonnet 5 (claude-sonnet-5) — speed/intelligence balance. $2/$10 (was introductory, now standard).
+- Claude Haiku 4.5 (claude-haiku-4-5) — fastest, near-frontier. $1/$5.
+- Context: 1M tokens for Fable/Opus/Sonnet, 200k for Haiku. Max output 128K (64K Haiku). Older: Opus 4.8/4.7/4.6, Sonnet 4.6/4.5. Special: Claude Mythos 5 (cyber, invitation-only Project Glasswing).
+- Tokenizer note: Opus 4.7+ tokenizer produces ~30% more tokens for same text (cost/compat caveat).
+
+TOOL CALLING / FUNCTION CALLING
+- Tool use via `tools` param + tool_use/tool_result content blocks. tool_choice: auto/any/tool/none. Parallel tool use.
+- Server-side tools: web search ($10/1k searches), web fetch (free), code execution (container hours), bash, text editor, computer use.
+- Tool use adds a hidden system-prompt token cost (286–804 tokens depending on model + tool_choice; e.g. Opus 5 auto=286, any=406).
+- Structured outputs supported (JSON schema).
+- Edge cases: `thinking` blocks interleave with tool_use in the same assistant turn; stop_reason "tool_use" vs "end_turn"; cache_control breakpoints on content blocks.
+
+MULTIMODAL SUPPORT
+Text in/out + image input (vision). No native audio/video input/output in the Messages API (transcription handled separately). PDFs via file handling.
+
+PROTOCOLS / STANDARDS
+- Anthropic CREATED MCP (Model Context Protocol) — the de facto agent-tool standard, adopted by OpenAI, Google, Groq, OpenRouter, etc.
+- No A2A (Google's protocol). Bedrock/Vertex/Foundry multi-cloud hosting is a major distribution strategy.
+- The Anthropic Messages format is the second-widest target in abstraction layers (next to OpenAI).
+
+PRICING / COST MODEL
+- Per-token input/output + prompt caching (5m write 1.25x, 1h write 2x, cache hit 0.1x). Batch API = 50% off. Fast mode = premium (Opus 5 $10/$50). Data residency (inference_geo "us") = 1.1x. Long context (1M) at standard rate.
+- Managed Agents billed on tokens + $0.08/session-hour runtime.
+- Sources: https://platform.claude.com/docs/en/about-claude/pricing
+
+FEATURES
+Prompt caching (auto top-level cache_control + explicit block breakpoints), Message Batches API (up to 300k output w/ beta header), extended/adaptive thinking, fast mode, web search, code execution, computer use, citations, file handling, structured outputs, Claude Code + Agent SDK ecosystem.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- Expensive output tokens relative to competitors (Fable $50/MTok output; Opus $25).
+- Rate limits / capacity (esp. during model launches); often the bottleneck in agent loops.
+- No first-party OpenAI-compat endpoint — requires a translation layer in multi-provider apps.
+- Tokenizer change (+30% tokens) silently raises effective cost and breaks cached-token assumptions.
+- "Claude is too verbose / needs length control" recurring user complaint; thinking-block handling complicates output parsing.
+- Tool-use system-prompt overhead is a non-obvious cost multiplier.
+
+ABSTRACTION HINTS
+- Anthropic Messages is the main "counter-format" to OpenAI. A neutral abstraction must translate OpenAI tools -> Anthropic tool_use blocks and back, and normalize stop_reason/finish_reason.
+- Reasoning/thinking: Anthropic uses `thinking` blocks + extended/adaptive thinking (no separate reasoning_content field). Different from OpenAI reasoning tokens and DeepSeek reasoning_content — the classic cross-provider normalization problem.
+- Because Anthropic authored MCP, tool/agent ecosystems default to MCP, which is now the convergence layer above raw model APIs.

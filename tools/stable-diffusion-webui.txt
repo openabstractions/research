@@ -1,0 +1,23 @@
+Stable Diffusion WebUI (AUTOMATIC1111 / Forge)
+=========
+
+CATEGORY: creative/generation
+LICENSE: AGPL-3.0
+
+WHAT IT IS
+  The original community-standard Gradio web UI for Stable Diffusion image generation; Forge is a performance-focused fork keeping the same UI but reworking memory/inference.
+
+ARCHITECTURE / SEAMS
+  No node graph at all — a tabbed, form-based Gradio UI over a monolithic `modules/` directory. The only extension seam is the script/extension class hook (UI + callbacks). Forge separates a `backend/` (custom PyTorch UNet) and adds `UnetPatcher` (runtime layer monkey-patching) and a reworked memory manager, but keeps the non-graph UI.
+
+STINKS
+  - A1111 is effectively unmaintained/stagnant (last tagged release 2023, "unstable" backlog).
+  - No composition model; parameters are ad-hoc UI widgets, not typed ports, so programmatic reuse is awkward.
+  - Dependency pinning pain (Python 3.10.x, torch/Gradio conflicts) and frequent extension breakage.
+
+DONE GREAT
+  - Low-friction form UX and mature txt2img/img2img/inpainting/upscaling feature breadth made it the historical standard.
+  - Forge's UnetPatcher is a clean runtime model-patching abstraction.
+
+ABSTRACTION ANGLE
+  The clearest counterpoint to ComfyUI: a monolith, not a graph. It demonstrates the "form UI vs node graph" split — functionality hardwired into widgets rather than typed components. Its value to a standard is negative space: it proves why a typed component/graph model matters and shows the only seam worth absorbing is the extension hook (and Forge's patch layer), not the UI.

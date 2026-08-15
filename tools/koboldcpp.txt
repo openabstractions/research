@@ -1,0 +1,23 @@
+KOBOLDCPP
+=========
+
+CATEGORY: local inference engine
+LICENSE: AGPL-3.0 (project); bundled upstream libs (ggml, llama.cpp, stable-diffusion.cpp, TTS.cpp) MIT
+
+WHAT IT IS
+  Single-file, zero-install executable running GGML/GGUF models with a bundled KoboldAI Lite UI, plus many extra modalities (image/video gen, TTS, STT, vision, music) and multiple compatible API endpoints.
+
+ARCHITECTURE / SEAMS
+  llama.cpp fork with a Python launcher/UI layer packaged into one binary. Core C/C++ engines (llama.cpp/ggml + sibling .cpp engines) exposed through a shared Python "expose"/adapter layer. A multi-API endpoint layer (Kobold/OpenAI/Ollama/A1111/ComfyUI/Whisper/Xtts) sits on one port with per-endpoint backend routing.
+
+STINKS
+  - AGPL-3.0 copyleft is a commercial red flag vs MIT/Apache peers.
+  - Single-author-heavy, frequent regressions; docs wiki-heavy and disorganized.
+  - AV false positives on the PyInstaller binary; AMD second-class; imperfect API-compat shims.
+
+DONE GREAT
+  - Broadest modality coverage of the local runners behind one port.
+  - The multi-API compatibility-adapter layer (text/image/TTS/STT engines routed per endpoint) is a ready-made multimodal provider boundary.
+
+ABSTRACTION ANGLE
+  Owns compute backend (multi-engine) + a communication layer that is itself an explicit compatibility-adapter seam. The per-endpoint backend routing is the most instructive pattern for a unified abstraction: it proves one port can dispatch text/image/audio to different engines behind different API surfaces. A universal standard would absorb that routing seam, treating KoboldCpp as a case study in multimodal capability routing rather than a permissive dependency.

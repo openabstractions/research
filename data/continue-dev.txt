@@ -1,0 +1,38 @@
+NAME
+Continue.dev (Continue)
+
+CATEGORY
+Coding agent (IDE extension + CLI)
+
+OFFICIAL SITE
+https://continue.dev
+
+GITHUB REPO
+https://github.com/continuedev/continue
+
+LICENSE
+Apache 2.0 (© Continue Dev, Inc.)
+
+WHAT IT DOES
+Open-source coding agent as a VS Code/JetBrains extension and CLI; define custom assistants with models, rules, and context providers.
+
+TECHNICAL ARCHITECTURE
+TypeScript monorepo: VS Code extension, JetBrains plugin, CLI (@continuedev/cli), shared "core" lib, "gui" webview UI, and a Rust "binary" sidecar used for local codebase indexing/retrieval. Runs in IDE extension host or as CLI. Tools include file edit, terminal, MCP tools. Config is JSON (YAML) defining assistants, models, context providers, and rules.
+
+CONTEXT / PROJECT ABSTRACTION
+Context-provider abstraction: @-mentions pull files, code, docs, URLs, diff, terminal output. "@codebase" context uses local embeddings + retrieval (Rust sidecar index) for RAG-style semantic retrieval. Rules via .continuerules. This is the closest to an explicit "context provider" plugin seam among the open tools.
+
+TOOL CALLING / MCP SUPPORT
+MCP client support (added as a tool/context mechanism), plus native tools and config-driven custom tools. Historically more context/chat-oriented than a full autonomous tool loop.
+
+PROVIDER SUPPORT
+Any model: OpenAI, Anthropic, Google, DeepSeek, Ollama/LM Studio (local), OpenRouter, AWS Bedrock, Azure, etc. Very model-agnostic via a providers config.
+
+KEY FEATURES
+Custom assistants; context providers; @codebase RAG retrieval; rules; MCP; CLI; VS Code + JetBrains surfaces.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+The repo is now README-marked "no longer actively maintained and is read-only"; final 2.0.0 release shipped (removed telemetry, pulled auth); JetBrains plugin deprecated in favor of CLI; config (JSON/YAML) complexity; indexing/performance on large repos. Continue was acquired (Google, 2025) — long-term direction uncertain. https://github.com/continuedev/continue
+
+ABSTRACTION HINTS
+Clean seams: "context providers" (files/diff/docs/embeddings — an explicit context abstraction), assistants config (prompt+model+context+rules), models. The @codebase RAG retrieval (Rust sidecar) is a reusable embedding-index seam. Because the repo is effectively archived, its abstraction value is reference-only. Best seam worth studying: context providers.

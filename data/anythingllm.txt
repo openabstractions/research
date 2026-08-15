@@ -1,0 +1,39 @@
+NAME: AnythingLLM
+
+CATEGORY: chat UI (all-in-one local-first AI app — chat + RAG + agents + multi-user)
+
+OFFICIAL SITE: https://anythingllm.com (docs: https://docs.anythingllm.com)
+
+GITHUB REPO: https://github.com/Mintplex-Labs/anything-llm
+
+LICENSE: MIT (permissive; safe). Note: cloud/hosted is a paid product; self-hosted has separate TERMS_SELF_HOSTED.md and PostHog telemetry (opt-out via DISABLE_TELEMETRY=true).
+
+WHAT IT DOES: Private, local-first "ChatGPT for your docs": connect local or cloud LLMs, ingest documents, chat with citations, plus no-code agents, MCP, multi-user, and a full developer API.
+
+TECHNICAL ARCHITECTURE:
+- Monorepo: `frontend` (Vite + React), `server` (Node.js Express — LLM + vectorDB + API), `collector` (separate Node Express service for document parsing/embedding), plus submodules `embed` (web widget) and `browser-extension`.
+- ORM: Prisma (SQLite default / Postgres). Vector DB: LanceDB default (also PGVector, Astra, Pinecone, Chroma, Weaviate, Qdrant, Milvus, Zilliz).
+- Deploys: Docker Compose (recommended), cloud templates (AWS/GCP/DO/Railway), bare-metal, or a desktop app (Electron). Local-first by default.
+
+PROVIDERS / MODELS SUPPORTED (very broad): Local — Ollama, LM Studio, LocalAI, KoboldCPP, text-generation-webui, llama.cpp, Docker Model Runner, oMLX. Remote — OpenAI, Azure, Anthropic, AWS Bedrock, Google Gemini, NVIDIA NIM, DeepSeek, Mistral, Groq, Cohere, Together, Fireworks, Perplexity, OpenRouter, xAI, Moonshot, Cerebras, SambaNova, LiteLLM, and generic OpenAI-compatible endpoints. Plus embedder/TTS/STT/vector DB providers.
+
+API / PROTOCOLS IT SPEAKS:
+- Consumes: OpenAI-compatible API + provider SDKs; MCP-compatible (client). Exposes: full Developer API for custom integrations; embeddable chat widget; browser extension.
+
+KEY FEATURES: RAG ("chat with docs", citations, 20+ file types); no-code Agent builder + "Agent Flows"; MCP compatibility; dynamic model routing; intelligent tool/skill selection (cuts token usage up to 80%); scheduled tasks/cron; memories (auto + user-managed); multi-user + permissions (Docker version only); embeddable chat widget; browser extension; multimodal; telemetry (opt-out).
+
+TOOL CALLING / MCP SUPPORT:
+- Yes — MCP-compatibility (connect MCP servers as agent tools), no-code agent builder with tool/skill selection, custom agents with tools, scheduled jobs with agent capabilities. Supports DeepSeek reasoning models (reasoning_content handled).
+
+MULTIMODAL SUPPORT: Yes — multimodal for closed and open-source LLMs (vision input, image gen via models, TTS/STT, document/audio/video transcription).
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS:
+- Telemetry (PostHog) is on by default — privacy concern; opt-out via env var/in-app. (Openly documented in README.)
+- Feature gating: multi-user/permissions and embed widget are Docker-only; desktop app is single-user — parity gap.
+- Collector is a separate process/service (more moving parts; must run alongside server).
+- "Open Computer" agent environment is experimental/immature.
+- Default vector store (LanceDB) scales differently vs Postgres/Pinecone for large docs; re-embedding/index rebuilds can be slow.
+
+ABSTRACTION HINTS:
+- Clean seams: frontend/server/collector split (collector as a decoupled document-parsing service is an ideal extraction point); Prisma schema as data boundary; LLM/embedder/vectorDB "connector" abstraction in `server/` (each provider = a module); Developer API as an interface layer.
+- Monolith seams: server bundles chat, agents, routing, memories, multi-tenant auth, and API; embed + browser-extension are submodules (separate concerns that could be pulled further apart).

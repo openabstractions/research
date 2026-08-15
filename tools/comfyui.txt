@@ -1,0 +1,23 @@
+ComfyUI
+=========
+
+CATEGORY: creative/generation
+LICENSE: GPL-3.0
+
+WHAT IT IS
+  The de-facto standard node-graph engine for diffusion/generative models (image, video, audio, 3D), with a visual editor, REST/WebSocket backend, and a huge custom-node ecosystem.
+
+ARCHITECTURE / SEAMS
+  A typed directed-acyclic node graph: every node declares typed INPUT_TYPES/OUTPUT_NODE and the engine wires data through typed ports. The execution engine (comfy_execution) does async queuing, caching, and lazy partial re-execution of dirty subgraphs, plus VRAM offloading. Clean where the engine, node typing, and JSON workflow serialization are separated; monolith where node defs, model loaders, and UI concerns intermingle in one repo, and custom_nodes are raw unsandboxed Python imports.
+
+STINKS
+  - GPL-3.0 licensing friction for custom nodes/derivatives; community debate unresolved.
+  - Weekly breaking-change churn; custom nodes break between versions, version pinning painful.
+  - Dependency hell (each custom node pulls conflicting torch/numpy/cuda) and supply-chain risk from arbitrary-Python custom nodes.
+
+DONE GREAT
+  - The node typing + JSON workflow format standardizes components better than any peer; workflows are fully portable and embeddable in generated media.
+  - Lazy partial re-execution + caching is a genuinely clean execution abstraction.
+
+ABSTRACTION ANGLE
+  The canonical node-graph abstraction in generative AI: every model/operation is a typed node with typed ports, serialized as JSON. This is the strongest existing "component standard" to absorb — a universal standard could take the node + typed-port + JSON-graph contract and lift it out of the Python engine, leaving execution/caching/offloading as an implementation detail.

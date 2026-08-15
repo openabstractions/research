@@ -1,0 +1,26 @@
+CLAUDE CODE
+=========
+
+CATEGORY: coding agent
+LICENSE: proprietary / source-available (NOT OSI; Anthropic Commercial ToS)
+
+WHAT IT IS
+  Agentic coding tool that reads a codebase, edits files, runs shell, and handles git via natural language; terminal/IDE/desktop/web all share one engine.
+
+ARCHITECTURE / SEAMS
+  No prebuilt index/LSP/AST: agent-driven discovery (grep/glob to find, Read to pull into context). Context persistence via CLAUDE.md (project/global memory) + auto memory. Subagents run in isolated context windows. Tool execution via built-in tools (Read/Write/Edit/Bash/Grep/Glob/Task/WebFetch/WebSearch) plus full MCP client (stdio + HTTP/SSE) and hooks; Bash gated by a permission system (allow/deny, per-session approval, optional OS sandbox). Clean seams: MCP (tools), CLAUDE.md/skills/hooks (context + lifecycle), permission system (execution gate), Agent SDK + subagents (orchestration). Core agent loop is proprietary.
+
+STINKS
+  - Core agent loop proprietary; source-available only, not open
+  - No index/LSP — context bloat and loops on large repos
+  - Usage-based cost + rate limits; permission-prompt fatigue
+  - Weaker Windows support (Bash needs Git for Windows)
+
+DONE GREAT
+  - One engine across terminal/IDE/desktop/web; headless `claude -p` for CI
+  - Agent SDK — build custom agents on the same engine (real extension point)
+  - CLAUDE.md + auto memory as a portable context/instruction convention
+  - Hooks for lifecycle interception around tool execution
+
+ABSTRACTION ANGLE
+  Owns the agent + tool layer. Project context is "agent-discovered files + CLAUDE.md memory" (no index), so a standard could formalize the memory/instruction seam (CLAUDE.md) as a universal context contract. Tool execution is MCP + hooks + a permission gate — the permission/approval gate is a seam worth standardizing. Agent SDK + subagent orchestration is the layer a universal standard could absorb.

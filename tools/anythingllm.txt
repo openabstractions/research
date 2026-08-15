@@ -1,0 +1,25 @@
+ANYTHINGLLM
+===========
+
+CATEGORY: chat UI
+LICENSE: MIT (permissive; cloud/hosted is paid; self-hosted has separate terms + PostHog telemetry, opt-out)
+
+WHAT IT IS
+  Local-first "ChatGPT for your docs": connect local/cloud LLMs, ingest documents, chat with citations, plus no-code agents, MCP, multi-user and a developer API.
+
+ARCHITECTURE / SEAMS
+  Monorepo: frontend (Vite+React), server (Node Express — LLM + vectorDB + API), collector (separate Node service for document parsing/embedding), plus embed widget and browser-extension submodules; Prisma ORM (SQLite/Postgres); LanceDB default vector store. Clean seams: frontend/server/collector split; collector as decoupled doc-parsing service; Prisma schema as data boundary; LLM/embedder/vectorDB connector abstraction; Developer API. Monolith seams: server bundles chat, agents, routing, memories, multi-tenant auth and API.
+
+STINKS
+  - Telemetry (PostHog) on by default — privacy concern.
+  - Feature gating: multi-user/permissions and embed widget are Docker-only; desktop app single-user.
+  - Collector is a separate process (more moving parts).
+  - "Open Computer" agent env experimental; default vector store scales differently for large docs.
+
+DONE GREAT
+  - Collector as a decoupled document-parsing service is the cleanest extraction point in the batch.
+  - Clean LLM/embedder/vectorDB connector abstraction; MIT license (safest to build on).
+  - Broad provider support + full Developer API + embeddable widget.
+
+ABSTRACTION ANGLE
+  Occupies client + context (RAG) + capability/tooling layers. It already splits ingestion (collector) from serving (server), which maps directly to the "context" abstraction. What we'd extract: the collector/ingestion service as a standalone context provider, and the LLM/vectorDB connector layer; the embed widget + Developer API are ready-made client/acquisition seams.

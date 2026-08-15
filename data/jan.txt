@@ -1,0 +1,55 @@
+NAME
+Jan
+
+CATEGORY
+Local inference engine / model runner (desktop app)
+
+OFFICIAL SITE
+https://jan.ai
+
+GITHUB REPO
+https://github.com/janhq/jan (app); engine: https://github.com/janhq/cortex.cpp (archived, moved to menloresearch/llama.cpp)
+
+LICENSE
+Apache-2.0 (desktop app per README). Historically the codebase was AGPL-3.0; the engine (Cortex) is Apache-2.0. Note: bundled KoboldAI-derived/other components may carry their own licenses.
+
+WHAT IT DOES
+Open-source, privacy-first "ChatGPT alternative" desktop app that runs LLMs 100% offline, plus a local OpenAI-compatible API server, and can connect to remote/cloud models.
+
+TECHNICAL ARCHITECTURE
+- Desktop app built with Tauri (Rust shell) + React/TypeScript web UI (folders: `src-tauri`, `web-app`, `core`).
+- Inference engine is a C++ server wrapping llama.cpp (GGUF), historically named Nitro, later Cortex (`cortex.cpp`, now archived and migrated to menloresearch/llama.cpp); also ships an `mlx-server` for Apple Silicon MLX models.
+- Engine runs as a sidecar process exposing an OpenAI-compatible API; app and engine communicate over local HTTP (default port 1337 for the OpenAI-compat server).
+- Models stored in a local models directory (GGUF/MLX); cloud providers (OpenAI/Anthropic/Mistral/Groq/MiniMax) reached via their remote APIs.
+
+API / PROTOCOLS IT SPEAKS
+- OpenAI-compatible local server at http://localhost:1337/v1 (chat/completions, embeddings, models).
+- App-level extension system; cloud provider adapters for OpenAI, Anthropic, Mistral, Groq, MiniMax.
+
+KEY FEATURES
+- Download/run open models from Hugging Face; create "custom assistants"; full offline operation.
+- OpenAI-compatible API server for other apps; cloud model connectivity in the same UI.
+- MCP (Model Context Protocol) integration for agentic capabilities.
+- Cross-platform (Windows/macOS/Linux, incl. AppImage/Flatpak/Microsoft Store); GPU acceleration for NVIDIA/AMD/Intel Arc + Apple Silicon.
+
+MODEL DOWNLOAD MECHANISM
+- In-app model hub backed by Hugging Face search; downloads GGUF (llama.cpp) and MLX models. No custom registry; `cortex pull <model>` CLI for the engine. Formats: GGUF, MLX.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- Churn/instability in the engine layer: Nitro -> Cortex -> menloresearch migration; cortex.cpp repo archived, confusing users and integrators about which engine/API is canonical.
+- Smaller team/ecosystem than Ollama/LM Studio; slower feature cadence and thinner documentation; API server historically limited (e.g., embeddings/vision gaps).
+- GitHub issues cite: crashes on model switch, incomplete vision/embeddings support, GPU offload quirks on Windows/AMD, occasional silent failures downloading large models.
+- History of license ambiguity (moved from AGPL to Apache) — worth verifying component-by-component before commercial embedding.
+
+TOOL CALLING / MCP SUPPORT
+- OpenAI-compatible function calling via the local server (engine supports tools; cortex had function-calling example). Works but less polished than Ollama.
+- MCP: supported in the app (MCP integration listed as a feature) for agentic use; engine-level MCP support limited. Moderate maturity.
+
+MULTIMODAL SUPPORT
+- Text is primary; vision support is present but has been inconsistent across versions (vision models depend on engine build). No native audio/TTS/image-gen in the desktop app. Embeds/embeddings limited. Mostly text (+ partial vision).
+
+RESOURCE MANAGEMENT
+- Auto load/unload of models; GPU acceleration toggle + hardware detection (NVIDIA/AMD/Intel) with CPU fallback; context-length and thread settings in UI. Manual resource controls are coarser than LM Studio/llama.cpp (less exposed). Concurrency limited. No cross-app coordination.
+
+ABSTRACTION HINTS
+- Explicit front/back split: React/Tauri UI -> local HTTP OpenAI-compat server -> C++ llama.cpp/MLX engine. The engine itself is a standalone sidecar (Cortex) with its own CLI (`cortex run/pull/ps`) and OpenAI-compat API — i.e., the app is really a client of a separately-versioned inference platform. That sidecar boundary is the natural seam to target/duplicate in an abstraction layer. Cloud-vs-local is unified behind provider adapters in the UI, another reusable seam.

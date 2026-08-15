@@ -1,0 +1,24 @@
+OLLAMA
+======
+
+CATEGORY: local inference engine
+LICENSE: MIT
+
+WHAT IT IS
+  Turnkey single-binary local LLM runtime: CLI + local REST server that downloads, manages, and runs open models on CPU/GPU with a focus on developer ergonomics.
+
+ARCHITECTURE / SEAMS
+  Go server/CLI layer shells out to a swappable C/C++ runner subprocess (llama.cpp or, on Apple Silicon, MLX) over an internal RPC. Four clean seams: (1) Go API/scheduler, (2) inference runner process, (3) content-addressed GGUF blob store, (4) registry resolver (Ollama registry / HuggingFace / generic OCI). The OpenAI-compat /v1 layer is a thin adapter over the native /api surface.
+
+STINKS
+  - Silent auto-unload after keep_alive timeout causes cold-start latency spikes.
+  - Default open LAN port without auth; no coarse memory management, no PagedAttention/continuous batching, so concurrent throughput lags vLLM.
+  - Lags upstream llama.cpp on newest quant formats and kernels between releases.
+
+DONE GREAT
+  - Zero-friction model lifecycle: `pull/run/create/push`, Modelfile, auto-pull on missing model.
+  - OCI-compatible registry + GGUF content-addressed store; import from GGUF/Safetensors.
+  - First-class tool calling + MCP (mcphost) makes it the default agent backend.
+
+ABSTRACTION ANGLE
+  Occupies the compute backend + acquisition/registry + client layers in one monolith; the runner subprocess and OpenAI-compat adapter are the swappable seams. A universal standard would absorb: (a) the OpenAI-compat /v1 interface as the provider boundary, and (b) the model-manifest/registry layer as a decoupled acquisition abstraction rather than Ollama-specific pull semantics.

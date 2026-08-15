@@ -1,0 +1,54 @@
+NAME
+Groq
+
+CATEGORY
+Cloud API platform / model provider (inference host for open models on custom LPU hardware)
+
+OFFICIAL SITE
+https://groq.com / https://console.groq.com
+
+DOCS URL
+https://console.groq.com/docs (API ref at /docs/api-reference)
+
+API PROTOCOL / FORMAT
+- OpenAI-compatible: base_url https://api.groq.com/openai/v1 — supports Chat Completions AND Responses API (client.responses.create). groq-sdk (Python/TypeScript). OpenAI SDK drop-in.
+- Source: https://console.groq.com/docs/overview, /docs/openai, /docs/responses-api
+
+KEY MODELS
+Hosts open-weight models only (no GPT/Claude/Gemini). Focus is raw speed on LPU hardware:
+- openai/gpt-oss-120b ($0.15 in / $0.60 out, ~500 tps), openai/gpt-oss-20b ($0.075/$0.30, ~1000 tps).
+- llama-3.3-70b-versatile ($0.59/$0.79), llama-3.1-8b-instant ($0.05/$0.08), qwen/qwen3.6-27b, minimaxai/minimax-m2.7.
+- Whisper (whisper-large-v3 / turbo) for ASR. Groq Compound / Compound Mini (agentic "systems").
+- Source: https://console.groq.com/docs/models
+
+TOOL CALLING / FUNCTION CALLING
+- Three patterns: (1) Groq built-in tools (web search, visit website, code execution, Wolfram Alpha, browser search) — server-side, single-call agentic loop; (2) remote tool calling via MCP (Groq connects to an MCP server URL + auth, discovers + executes tools server-side in one call); (3) local function calling (OpenAI-style tools/tool_calls, you run the loop).
+- Parallel tool use is model-dependent (Llama 3.3/Qwen/MiniMax yes; GPT-OSS 20B/120B NO). JSON mode broad.
+- Edge cases: built-in tools only on groq/compound* and gpt-oss models; Compound systems don't expose local tools.
+- Source: https://console.groq.com/docs/tool-use/overview
+
+MULTIMODAL SUPPORT
+Text + vision/OCR (vision models) + ASR (Whisper) + TTS (Orpheus / playai). No image/video generation.
+
+PROTOCOLS / STANDARDS
+- MCP: first-class — remote MCP tool calling + Google Workspace connectors (Gmail/Calendar/Drive). OpenCode/Claude Code/Cline/Roo Code integrations. Prometheus metrics.
+- No A2A push. Speed (300–1000+ tps) is the platform's defining axis.
+
+PRICING / COST MODEL
+- Per-token, very cheap; Whisper billed per audio-hour. Service tiers: Performance / Flex processing / Batch. Spend limits, projects, model permissions.
+- Source: https://console.groq.com/docs/models, /docs/service-tiers
+
+FEATURES
+Prompt caching, structured outputs, reasoning, batch, flex processing, LoRA inference, speech-to-text/text-to-speech, OCR/vision, content moderation, built-in tools, remote MCP, Compound systems, OpenBench.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- Limited catalog: open models only; no frontier proprietary models; some recent models are behind Enterprise/contact-sales.
+- LPU hardware lock-in — Groq is the only host; no portability of their infra optimizations.
+- Parallel tool use missing on GPT-OSS models (limits agent efficiency); model-specific capability matrix to track.
+- Rate limits aggressive on free/dev tier; built-in tools are Groq-specific (not portable to other providers).
+- Model selection/quality varies; "speed" marketing over state-of-the-art capability.
+
+ABSTRACTION HINTS
+- Groq is a pure OpenAI-compatible base_url swap, differentiated by latency not API shape. Abstraction layers treat it as drop-in OpenAI with a "fast open model" role.
+- Its server-side tooling (built-in tools + remote MCP) foreshadows where tool-calling is heading: tools as hosted services, not client-side JSON — an abstraction should support both "local" and "server-side/remote" tool patterns.
+- Reasoning is surfaced via OpenAI-style reasoning models (no bespoke field), keeping it low-friction.

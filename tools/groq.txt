@@ -1,0 +1,24 @@
+Groq
+=========
+
+CATEGORY: cloud API platform / model provider (inference host)
+LICENSE: n/a closed
+
+WHAT IT IS
+  OpenAI-compatible inference host for open-weight models on custom LPU hardware, differentiated by raw speed.
+
+ARCHITECTURE / SEAMS
+  Pure OpenAI-compatible base_url (api.groq.com/openai/v1), supporting both Chat Completions and Responses API. MCP first-class: remote MCP tool calling + Google Workspace connectors. No A2A push; speed (300-1000+ tps) is the defining axis.
+
+STINKS
+  - Open models only; no frontier proprietary models; some recent models behind contact-sales.
+  - LPU hardware lock-in — no portability of infra optimizations.
+  - Parallel tool use missing on GPT-OSS models; built-in tools are Groq-specific (not portable).
+
+DONE GREAT
+  - Fastest inference (300-1000+ tps) as a platform differentiator.
+  - Server-side tooling: built-in tools + remote MCP executed server-side in one call.
+  - Cheap open models (GPT-OSS, Llama, Qwen) as OpenAI SDK drop-ins.
+
+ABSTRACTION ANGLE
+  Pure OpenAI-compatible base_url swap differentiated by latency, not API shape — treat as drop-in OpenAI with a "fast open model" role. Its server-side/remote MCP tool calling foreshadows tools-as-hosted-services; an abstraction must support both local and server-side tool patterns.

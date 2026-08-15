@@ -1,0 +1,24 @@
+Google Gemini
+=========
+
+CATEGORY: cloud API platform / model provider
+LICENSE: n/a closed
+
+WHAT IT IS
+  Frontier model provider with the broadest native multimodal surface; also the originator of the A2A protocol.
+
+ARCHITECTURE / SEAMS
+  Multiple surfaces: native Gemini REST (generateContent with contents[].role user/model and parts[]), plus OpenAI-compatible and Anthropic-compatible endpoints (Vertex). MCP adopted (Knowledge MCP, connectors); pushes its own A2A protocol + ADK.
+
+STINKS
+  - Fragmented surfaces (Gemini API vs Vertex vs "Agent Platform") with different IDs, quotas, auth.
+  - Three ways to call the same model (native + two compat shims) with subtle behavior differences.
+  - Native contents/parts format is the least OpenAI-compatible of the big three; safety filters and 429 throttling.
+
+DONE GREAT
+  - Broadest native multimodal (image/audio/video in/out, grounding, Live API).
+  - Grounding (Google Search/Maps/enterprise) as a first-class tool.
+  - Ships OpenAI/Anthropic compat shims, acknowledging the dominant formats.
+
+ABSTRACTION ANGLE
+  Converges ONTO OpenAI/Anthropic while keeping a richer native format — evidence OpenAI format is winning, but Gemini's multimodal+grounding is the superset an abstraction must eventually expose. A2A is the counter-standard to MCP at the orchestration layer; "thinking" is modeled as thought blocks/signatures (another normalization case).

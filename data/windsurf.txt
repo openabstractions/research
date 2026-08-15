@@ -1,0 +1,38 @@
+NAME
+Windsurf (now "Devin Desktop")
+
+CATEGORY
+Agentic coding IDE
+
+OFFICIAL SITE
+https://windsurf.com (rebranded; now https://www.devin.ai and Devin Desktop)
+
+GITHUB REPO
+none / closed source
+
+LICENSE
+Closed source / proprietary
+
+WHAT IT DOES
+AI IDE (VS Code fork) built around the "Cascade" agent; since the Cognition acquisition it is rebranded "Devin Desktop" — a command center to plan, delegate, review, and ship with local + cloud agents.
+
+TECHNICAL ARCHITECTURE
+Closed-source Electron IDE (VS Code-based, TypeScript). Cascade agent + "Flow" execution. Post-acquisition it becomes multi-agent: runs Devin Local, Devin Cloud, Codex, Claude Agent, OpenCode, and Cascade, interop via the Agent Client Protocol (ACP). Ships a full built-in editor (syntax highlighting, autocomplete, debugger, diff review). See https://windsurf.com (FAQ: windsurf-is-now-devin-desktop).
+
+CONTEXT / PROJECT ABSTRACTION
+"Fast Context" — instant codebase context retrieval (exact files/lines in milliseconds); LSP via language servers (rust-analyzer, clangd, gopls, Pyright); MCP servers for external data; "Spaces" share context + git worktrees across agents; "Supercomplete" predicts next edits. Hybrid: LSP + indexed search + shared Spaces rather than a single dependency graph.
+
+TOOL CALLING / MCP SUPPORT
+MCP client (Slack, Linear, Notion, Figma, Sentry, Stripe, Vercel, Datadog, Atlassian/Jira-Confluence, ESLint/Prettier extensions); language-server integration; ACP (Agent Client Protocol) as the model/agent interoperability layer.
+
+PROVIDER SUPPORT
+Cascade (proprietary), SWE-1.6 (free in-house model), plus via ACP: Devin Cloud/Local, Claude Agent (Anthropic), Codex (OpenAI), OpenCode, GPT-based agents. Closed-model focus; local/OS models not a priority.
+
+KEY FEATURES
+Cascade agent; multi-agent command center (Spaces, Kanban view); ACP; Fast Context; Supercomplete (Tab-Tab-Ship); diff review; cloud handoff ("Implement in Cloud"); MCP; JetBrains support.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+Major product churn — rebranded to Devin Desktop after Cognition acquisition (identity/migration confusion); historically confusing "flex credits" pricing and aggressive credit consumption complaints; Cascade model lock-in; closed source (no self-host/audit). Sourced from Windsurf community and the windsurf-is-now-devin-desktop announcement.
+
+ABSTRACTION HINTS
+ACP is the standout clean seam (agents/models interoperate over a protocol — external agents like OpenCode plug in); MCP for tools; LSP + Fast Context for context; Spaces for shared context/worktrees. The Cascade agent loop is proprietary, but ACP decouples it. Best seams to abstract: ACP (agent interop), MCP (tools), and codebase context (Fast Context / LSP).

@@ -1,0 +1,44 @@
+NAME: Open WebUI
+
+CATEGORY: chat UI (self-hosted AI platform; web UI that fronts LLM runners + OpenAI-compatible APIs)
+
+OFFICIAL SITE: https://openwebui.com
+
+GITHUB REPO: https://github.com/open-webui/open-webui
+
+LICENSE: "Open WebUI License" — a CUSTOM license (BSD-3-clause style + extra clause 4 that forbids altering/removing "Open WebUI" branding in any deployment >50 end-users/30 days without written permission or enterprise license). Originally MIT, relicensed ~Aug 2025. Multi-license codebase (see LICENSE_HISTORY / LICENSE_NOTICE); requires a Contributor License Agreement.
+
+WHAT IT DOES: Self-hosted, offline-capable AI chat interface for Ollama and any OpenAI-compatible API. Adds RAG, web search, image gen, plugins/agents, multi-user RBAC, and admin/analytics on top of a plain LLM chat.
+
+TECHNICAL ARCHITECTURE:
+- Backend: Python (FastAPI) in `backend/`; frontend: SvelteKit + TypeScript in `src/`. Single FastAPI service serves the built SPA (monolith, one process).
+- Runs locally via `pip install open-webui` / `uv`, or Docker (images `:main`, `:cuda`, `:ollama`). Helm/Kustomize for K8s.
+- Connects to providers via the Ollama REST API (`OLLAMA_BASE_URL`) and the OpenAI-compatible API (`OPENAI_API_KEY`/`OPENAI_API_BASE_URL`), plus a "Pipelines" plugin mechanism for arbitrary backends.
+- Storage: SQLite (default) or PostgreSQL; files local/S3/GCS/Azure Blob. Horizontal scaling via Redis sessions + WebSockets.
+
+PROVIDERS / MODELS SUPPORTED:
+- Local: Ollama (native), LM Studio, vLLM, Llama.cpp and anything OpenAI-compatible; bundled `:ollama` image.
+- Remote: OpenAI, Anthropic, DeepSeek, Groq, Mistral, OpenRouter, Google Gemini (via compatible endpoints), Azure, and dozens more via OpenAI-compatible URL.
+
+API / PROTOCOLS IT SPEAKS:
+- Consumes: OpenAI API, Ollama API, Anthropic API (subset), plus many search/STT/TTS/image services.
+- Exposes: its own OpenAI-compatible API (used by desktop app / pipelines), WebSocket streaming, and a Pipelines plugin runtime.
+
+KEY FEATURES: Local RAG (9 vector DBs: ChromaDB, PGVector, Qdrant, Milvus, Elasticsearch, OpenSearch, Pinecone, S3Vector, Oracle 23ai; hybrid BM25+vector, reranking); web search (20+ providers); web browsing; image gen/edit (DALL-E, Gemini, ComfyUI, A1111); plugins (Filters, Actions, Pipes, Tools, Skills); Models & Agents (wrap any model w/ instructions+tools+knowledge); Notes; Channels (collab timeline); persistent memory; calendar + automations (scheduled prompts); artifact key-value storage; multi-user + granular RBAC + user groups; voice/video call (Whisper/Deepgram/Azure STT + TTS); usage analytics/model eval (arena, A/B, ELO); LDAP/AD/OAuth/SCIM SSO; OpenTelemetry.
+
+TOOL CALLING / MCP SUPPORT:
+- Yes — native tool/function calling, plus OpenAPI tool servers, MCP and MCPO (MCP-over-OpenAPI) client support. Tools/Functions/Skills compose into Agents.
+- DeepSeek `reasoning_content` has a long history of bugs (R1 thinking not shown, or tool_calls dropping reasoning). Historically needed `REASONING_EFFORT`/`ENABLE_OLLAMA_API`-style toggles; largely patched but still surfaces for some OpenAI-compatible endpoints.
+
+MULTIMODAL SUPPORT: Strong — image input (vision), image generation/editing, audio STT/TTS, video call, file upload.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS:
+- License: custom "Open WebUI License" + branding clause + CLA is a major open-source community complaint (fork/monetization friction). See github.com/open-webui/open-webui/blob/main/LICENSE.
+- Backend is a growing monolith (`backend/open_webui/main.py` etc.); frequent breaking changes between releases; config surface (many env vars) is large and brittle.
+- Plugin/pipelines ecosystem churn — extension API changes between versions.
+- DeepSeek R1 / reasoning_content rendering + tool-call issues repeatedly filed; e.g. "reasoning_content" and "thinking" handling issues.
+- Resource heavy for a chat UI (Python + heavy RAG/vector stack); Docker networking to Ollama on host is a common support issue (`--add-host=host.docker.internal`).
+
+ABSTRACTION HINTS:
+- Cleanest seams: (1) the OpenAI-compatible provider abstraction + Pipelines (plugin runtime) — a natural "provider adapter" boundary; (2) RAG pipeline (loader→embedder→vector DB→retriever) is pluggable per vector DB; (3) plugin system (Filter/Action/Pipe/Tool/Skill) as the extensibility seam.
+- Monolith seams: single FastAPI app bundles auth, DB, RAG, chat, admin; frontend tightly coupled to backend via its own API. Splitting "backend core" vs "RAG engine" vs "plugin runtime" vs "provider gateway" is the obvious abstraction cut.

@@ -1,0 +1,53 @@
+NAME
+Flowise
+
+CATEGORY
+workflow/orchestration
+
+OFFICIAL SITE
+https://flowiseai.com (cloud; docs: https://docs.flowiseai.com)
+
+GITHUB REPO
+https://github.com/FlowiseAI/Flowise
+
+LICENSE
+Apache-2.0 (repo LICENSE.md).
+
+WHAT IT DOES
+Low-code, drag-and-drop visual builder for LLM apps, AI agents, and RAG (chatflows + agentflows), implemented as a thin wrapper over LangChain.js.
+
+TECHNICAL ARCHITECTURE
+- TypeScript monorepo (pnpm + turbo): `server` (Node/Express + Swagger), `ui` (React), `components` (third-party node integrations).
+- Nodes ARE LangChain.js primitives — each canvas node maps to a LangChain.js component (models, retrievers, chains, tools, memory). No independent graph engine; it orchestrates LangChain objects.
+- Storage: SQLite (default) or Postgres; deployments via Docker/AWS/Azure/GCP/Railway etc.
+
+MODEL FORMAT / ENGINES SUPPORTED
+Not a model runner. Inherits LangChain.js model integrations: OpenAI, Anthropic, Google, Mistral, Llama, HuggingFace, plus local via Ollama / LM Studio / OpenAI-compatible endpoints.
+
+API / PROTOCOLS IT SPEAKS
+- REST API (predictions, chatflows, agentflows, vector stores) with auto-generated Swagger/OpenAPI.
+- Embed widget + SDK for embedding chatflows in apps.
+- Webhooks for triggers.
+
+KEY FEATURES
+- Visual drag-drop canvas (React Flow) for building chatflows and agentflows without code.
+- RAG support (document loaders, vector stores, retrieval).
+- Multi-agent / agent orchestration nodes.
+- Marketplace of shareable flow templates.
+- Custom components/nodes (add your own LangChain integrations).
+
+TOOL CALLING / MCP SUPPORT
+MCP support present (MCP nodes/client to connect external MCP servers as tools). Tool calling via LangChain agent nodes.
+
+MULTIMODAL SUPPORT
+Limited and indirect: can use multimodal-capable LangChain models via nodes, but no native image/video/audio generation engine. It orchestrates text/LLM pipelines primarily.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- PROJECT ARCHIVED: repository was archived by the owner on Aug 13, 2026 (read-only). Future uncertain; README points to a "Future of Flowise" discussion (#6727). This is the single biggest risk — do not build new dependencies on it.
+- Tight coupling to LangChain.js: bugs/API churn in LangChain propagate directly; abstraction leaks LangChain concepts into the UI.
+- Limited custom logic: complex control flow requires custom nodes/code; less flexible than n8n or code frameworks.
+- Performance/scaling concerns for high-throughput or complex flows; visual graphs get unwieldy.
+- Smaller governance/enterprise story vs Dify/n8n.
+
+ABSTRACTION HINTS
+The node graph is a 1:1 visual skin over LangChain.js — the abstraction is clean ON THE SURFACE but shallow: nodes do not define their own runtime semantics, they wrap a library. Good for rapid prototyping; weak as a durable abstraction because the underlying library leaks through. A case study in "visual layer vs real abstraction layer".

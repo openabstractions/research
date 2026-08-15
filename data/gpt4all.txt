@@ -1,0 +1,56 @@
+NAME
+GPT4All
+
+CATEGORY
+Local inference engine / model runner (desktop app + Python SDK)
+
+OFFICIAL SITE
+https://www.nomic.ai/gpt4all
+
+GITHUB REPO
+https://github.com/nomic-ai/gpt4all
+
+LICENSE
+MIT (repository LICENSE.txt). (Nomic models/weights may carry their own licenses; the desktop installer bundles MIT-licensed components.)
+
+WHAT IT DOES
+User-friendly desktop app and Python SDK for running open LLMs privately on ordinary desktops/laptops with no GPU and no API calls, plus a bundled LocalDocs feature for private RAG over your own documents.
+
+TECHNICAL ARCHITECTURE
+- Monorepo: `gpt4all-backend` (C/C++ core wrapping llama.cpp + ggml), `gpt4all-bindings` (C/C++/Python/Node bindings), `gpt4all-chat` (Qt desktop GUI), `gpt4all-training`, plus a legacy `gpt4all-api` (Docker OpenAI-compat server).
+- Inference via llama.cpp GGUF; CPU-first with optional GPU via Nomic's Vulkan implementation (`nomic-vulkan`; NVIDIA + AMD) for Q4_0/Q4_1 quantizations.
+- LocalDocs does local embeddings + vector search (Sbert embeddings via llama.cpp embeddings) with a local SQLite/Bert-based store, run in-process.
+
+API / PROTOCOLS IT SPEAKS
+- Python SDK (`gpt4all` package) with chat_session/generate; C/C++ and Node bindings.
+- Legacy `gpt4all-api` Docker image served an OpenAI-compatible HTTP endpoint (chat completions) — largely superseded/less maintained.
+- No always-on local OpenAI server in the desktop app by default (the app is a GUI, not a server).
+
+KEY FEATURES
+- No GPU required; runs on everyday hardware (Windows/macOS/Linux, Windows ARM, Apple Silicon best results).
+- LocalDocs: private, local chat-with-your-documents (RAG) built in.
+- In-app model explorer/download; Python `GPT4All` class auto-downloads/loads models.
+- LangChain integration, Weaviate module, OpenLIT observability.
+
+MODEL DOWNLOAD MECHANISM
+- In-app "Model Explorer" and `GPT4All("name.gguf")` fetch from the gpt4all.io/Hugging Face hosted model catalog (GGUF files). No custom registry binary format; downloads are plain GGUF files. Formats: GGUF (llama.cpp), legacy GGML.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- Slow release cadence and drift from upstream llama.cpp; the pinned llama.cpp is often several versions behind, so newest models/quants may not load (common GitHub issue theme).
+- The OpenAI-compatible API server (gpt4all-api) is effectively unmaintained/stale; desktop app is GUI-only with no robust local server story, limiting programmatic/agent integration.
+- Limited GPU support (Vulkan Q4_0/Q4_1 only, no CUDA/Metal first-class); slower than competitors on GPU.
+- Windows/macOS code signing and installer friction; large download sizes; limited multimodal support historically.
+- Community complaints about sparse documentation and minimal maintainer responsiveness on issues.
+
+TOOL CALLING / MCP SUPPORT
+- Function calling / tool_calls: essentially not supported in the core (Python SDK offers simple generate/chat, no tools schema). The LangChain integration provides some agent tooling externally.
+- MCP: no native MCP support. Tool-calling maturity is the weakest among the peer runners.
+
+MULTIMODAL SUPPORT
+- Primarily text. Limited/no vision in the core backend (some work in newer releases, but not a headline feature). Embeddings supported (for LocalDocs). No audio/TTS/image-gen.
+
+RESOURCE MANAGEMENT
+- CPU-first: models loaded into RAM (mmap), optional partial GPU offload via Vulkan. Model load/unload manual via API/UI; single-model-at-a-time in the GUI. No automatic idle unload or cross-app coordination; concurrency limited (one generation stream).
+
+ABSTRACTION HINTS
+- Clear C/C++ core vs bindings vs GUI split: `gpt4all-backend` (llama.cpp wrapper) is exposed through `gpt4all-bindings`, which is what the Python/Node SDKs and the Qt GUI both consume — a textbook reusable engine-seam. The Python `GPT4All` object is itself a lightweight provider interface. LocalDocs is a separate RAG layer on top of the embeddings API, another clean seam.

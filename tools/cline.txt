@@ -1,0 +1,26 @@
+CLINE
+=========
+
+CATEGORY: coding agent
+LICENSE: Apache 2.0
+
+WHAT IT IS
+  Open-source autonomous coding agent in IDE/terminal; reads project structure, edits files, runs bash, with plan/act modes, checkpoints, and human-in-the-loop approval.
+
+ARCHITECTURE / SEAMS
+  TypeScript monorepo sharing one "agent core" across SDK, CLI, VS Code extension, JetBrains plugin, and Kanban web board. No persistent index/LSP/AST: context = file contents + terminal/diagnostics output + rules (.clinerules), discovered by the model. Tool execution via read/write/edit/list_files/execute_command/browser + MCP tools; files through IDE APIs, terminal via integrated terminal (streams long-running dev servers). Checkpoints snapshot state for rollback. Clean seams: @cline/sdk (Agent + createTool() — a real programmatic abstraction), MCP (tools), .clinerules/skills (context), checkpoints (state).
+
+STINKS
+  - High token/API cost; context-window pressure on large repos
+  - BYO-API-key only; auto-approve security risk if misconfigured
+  - Occasional agent loops; VS Code extension mid-migration into monorepo
+  - No index/LSP — context is raw tool output
+
+DONE GREAT
+  - Shared agent core powering CLI/Kanban/VS Code/JetBrains
+  - @cline/sdk exposing Agent + createTool() — a genuine programmatic tool/orchestration layer
+  - Checkpoints + diff review + multi-agent teams (coordinator + specialists)
+  - Headless CLI for CI/CD with --json
+
+ABSTRACTION ANGLE
+  Owns the agent + tool layer. Project context is raw file/terminal/diagnostics output (no index), so the .clinerules + skills seam is what a universal context standard could absorb. Tool execution is MCP + createTool() — createTool is the exact "tool registration" seam a minimal standard should specify. The shared agent core (one engine, many surfaces incl. CLI/Kanban/JetBrains) is the abstraction target.

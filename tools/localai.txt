@@ -1,0 +1,24 @@
+LOCALAI
+=======
+
+CATEGORY: local inference engine
+LICENSE: MIT
+
+WHAT IT IS
+  Drop-in OpenAI/Anthropic/ElevenLabs-compatible engine that runs any model (text, vision, voice, image, video) on any hardware by orchestrating pluggable backend engines; a self-hosted replacement for cloud AI APIs.
+
+ARCHITECTURE / SEAMS
+  Thin Go core (HTTP compatibility layer + scheduler + model store) that spawns/manages swappable backend processes, each a best-in-class engine (llama.cpp, vLLM, SGLang, whisper.cpp, diffusers, MLX, etc.) shipped as OCI images pulled on demand. YAML model configs decouple "which model + params" from "which backend."
+
+STINKS
+  - Large surface area (many backends, distributed mode, agents) => steep learning curve, fast/breaking changes, lagging docs.
+  - Heavy first-run latency and disk footprint from pulling big backend OCI images.
+  - Uneven multi-backend feature/bug parity; unsigned macOS DMG; small team relative to scope.
+
+DONE GREAT
+  - The defining abstraction: an explicit, documented "build your own backend in any language" interface over isolated engines.
+  - Full modality coverage behind one API; first-class MCP/agent framework; multi-user auth/quota/RBAC.
+  - VRAM-aware routing, autoscaling, and dynamic memory reclaimer — real shared/multi-app resource handling.
+
+ABSTRACTION ANGLE
+  The closest existing analog to a true universal abstraction: it cleanly separates communication (drop-in API surface), hosting/resource-arbiter (Go core scheduler + reclaim + routing), and compute backend (swappable OCI-image engines). A universal standard would absorb LocalAI's three seams directly — the compatibility API, the backend interface, and the YAML model-config decoupling — and drop its monolith only in acquisition (still HuggingFace/Ollama/OCI-specific).

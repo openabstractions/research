@@ -1,0 +1,25 @@
+TENSORRT-LLM
+===========
+
+CATEGORY: runtime
+LICENSE: Apache License 2.0
+
+WHAT IT IS
+  NVIDIA-GPU-specific LLM/VLM inference compiler + runtime that maximizes tokens/sec and minimizes latency through custom CUDA kernels, quantization, parallelism, and scheduling.
+
+ARCHITECTURE / SEAMS
+  Originally a graph "build-then-run" compiler (Python DSL -> compiled TensorRT engine -> Python/C++ runtime); since v1.0 architected natively on PyTorch with a high-level Python LLM API. Seams: a define layer (Python) vs a compiled "engine" artifact (GPU-arch-specific); custom CUDA kernels + KV-cache manager + in-flight batching/paged attention + parallelism strategies. Serves via Triton backend and NVIDIA Dynamo. Formats: TensorRT engines (weight-stripped variants), trtllm-build checkpoints (config.json), quantized FP8/FP4/INT4 checkpoints — all NVIDIA-specific.
+
+STINKS
+  - NVIDIA-only: zero portability to AMD/Intel/TPU, hard hardware lock-in.
+  - Engines are GPU-architecture-specific; no cross-generation reuse, long rebuild times per arch.
+  - Heavy build step and version-pinned wheels/containers (exact CUDA/PyTorch/TensorRT matrix) — painful ops/build.
+  - Rapid churn, many legacy paths, 3-month deprecation policy, telemetry on by default.
+
+DONE GREAT
+  - Won by going all-in on one hardware target's compiler/kernel optimizations — 3-10x faster than "portable" alternatives beats portability.
+  - Clear compile-then-run split: Python define layer vs compiled engine artifact.
+  - Riding PyTorch (existing ecosystem runtime) instead of a bespoke DSL won developer familiarity.
+
+ABSTRACTION ANGLE
+  The counter-example to ONNX: raw performance within a vertical beats a portable standard when a vendor integration is orders of magnitude faster. But the compiled artifact is the portability/versioning pain point — the more a runtime optimizes, the less its artifacts are portable. Lesson for a universal abstraction: you can't compete with vendor speed on one axis, so win on the stable interchange layer instead; and when defining an abstraction, ride an existing ecosystem (PyTorch) rather than inventing a DSL.

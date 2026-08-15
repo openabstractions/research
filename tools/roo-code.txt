@@ -1,0 +1,26 @@
+ROO CODE
+=========
+
+CATEGORY: coding agent
+LICENSE: Apache 2.0
+
+WHAT IT IS
+  VS Code extension providing a "whole dev team" of AI agents via Modes (Code, Architect, Ask, Debug, Custom) — a fork of Cline.
+
+ARCHITECTURE / SEAMS
+  TypeScript VS Code extension; a fork of Cline sharing its tool core (read/write/edit, terminal, browser, MCP). Files via VS Code APIs; terminal via integrated terminal; checkpoints for rollback. "Modes" are declarative personas = system prompt + tool-set restrictions (.roomodes); .rooignore excludes files. Context = open files/selection/diagnostics + file-reading tools, scoped by mode; no persistent index/LSP/AST. Clean seams: Modes (persona + tool permissions), MCP (tools), checkpoints (state).
+
+STINKS
+  - Shut down May 15, 2026 — extension discontinued, repo archived
+  - Fork divergence from Cline (fragmentation/merge pain)
+  - Token/cost usage; mode-config complexity
+  - No index/LSP — context is raw tool output
+
+DONE GREAT
+  - "Modes" as a clean declarative abstraction: persona + tool-set per mode
+  - Per-mode MCP server tool groups; orchestrator mode
+  - Checkpoints + human approval/auto-approve
+  - Multi-provider (any model incl. local)
+
+ABSTRACTION ANGLE
+  Occupies the persona/orchestration layer. Its standout seam is the Mode abstraction — a declarative persona + tool-set scope — which is the exact "agent persona + tool permissions" contract a universal standard could specify. Tool execution is MCP + mode-scoped tool groups. Since the project is archived, value is reference-only; the Mode abstraction is the piece to absorb.

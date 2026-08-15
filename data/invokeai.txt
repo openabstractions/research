@@ -1,0 +1,57 @@
+NAME
+Invoke (formerly InvokeAI)
+
+CATEGORY
+creative/generation
+
+OFFICIAL SITE
+https://www.invoke.ai (docs/tutorials) — company/product "Invoke"; launcher download via GitHub releases.
+
+GITHUB REPO
+https://github.com/invoke-ai/InvokeAI
+Launcher: https://github.com/invoke-ai/launcher
+
+LICENSE
+Apache-2.0 (core repo). Note: repo also bundles several third-party model licenses (LICENSE-SD1+SD2.txt, LICENSE-SDXL.txt, LICENSE-HiDiffusion.txt, LICENSE-PiD.txt) — GitHub shows "Apache-2.0 and 3 other licenses found". Commercially-friendly core license; company sells commercial products on top.
+
+WHAT IT DOES
+Professional creative engine / web UI for Stable Diffusion-family image generation with a Unified Canvas (inpainting/outpainting) plus a node-based workflow system. Serves as the open-source foundation for Invoke's commercial products.
+
+TECHNICAL ARCHITECTURE
+- Python backend + React/TypeScript frontend (served as a local web app).
+- Two-layer abstraction: (1) friendly form UI and Unified Canvas; (2) an optional node-graph workflow editor (nodes + edges) conceptually similar to ComfyUI.
+- Services/event architecture: invoker + session queue + event bus (Redis/queue), SQLite database for board/gallery/metadata. Designed for a web-server model (not a Gradio single-user app).
+- Runs local GPU (CUDA/ROCm/MPS) via the launcher; Docker deployment supported.
+
+MODEL FORMAT / ENGINES SUPPORTED
+- Formats: ckpt, diffusers, and some gguf.
+- Engines: PyTorch (CUDA, ROCm, Apple Silicon MPS).
+- Models: SD1.5, SD2.0, SDXL, SD3.5 (Medium/Large), Flux.1 (Dev/Schnell/Kontext/Krea/Redux/Fill), Flux.2 (Dev/Klein), Z-Image, Krea 2, Anima, Qwen Image, Ideogram 4, ERNIE-Image, CogView 4. Some models are "API Only" (Nano Banana, GPT Image, Wan) — cloud, not local.
+
+API / PROTOCOLS IT SPEAKS
+- FastAPI REST backend + WebSocket for live progress/events.
+- Python client SDK for programmatic/queue access.
+- Community API; the web UI is the primary interface.
+
+KEY FEATURES
+- Unified Canvas: integrated painting/inpainting/outpainting, brush tools, layers-style editing — its signature differentiator.
+- Node-based Workflows: build/share generation pipelines; combines node power with UI ease.
+- Board & Gallery management: organized storage, drag-drop images into UI elements, rich metadata recall (prompts/settings/seed).
+- Model Manager, Embedding Manager, upscaling tools, SAM/SAM2 object segmentation & selection.
+- ControlNet/IP-adapter support; region-based prompting.
+
+TOOL CALLING / MCP SUPPORT
+- MCP support exists (Invoke exposes an MCP server so AI agents/coding assistants can drive the canvas, generation, and workflow capabilities). Not an agent framework itself.
+
+MULTIMODAL SUPPORT
+Primarily still-image generation/editing (inpainting/outpainting/upscaling). Video generation only via API-only models (Wan); no native audio/3D pipeline in core.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- Heavier, more complex install than A1111/ComfyUI (launcher + many deps; Docker recommended).
+- Model support lags ComfyUI: fewer and slower-to-adopt new models/architectures; some formats (newer video/audio) absent or API-only.
+- Node workflow system is less flexible/powerful than ComfyUI's raw graph and has a much smaller custom-node ecosystem.
+- Community tension around commercialization: core is Apache-2.0, but features increasingly gated behind the paid product line; perception that the OSS tier is a funnel.
+- Web-server architecture is heavier to run than single-file ComfyUI/A1111 for casual users.
+
+ABSTRACTION HINTS
+Interesting dual abstraction: a curated "app" abstraction (canvas + forms) sitting on top of a typed node-graph — both are first-class, and the node graph can be entered/edited visually. Architecturally cleaner than ComfyUI (services, typed nodes, DB metadata) and more "product" than "framework", but the abstraction is more opinionated and less raw/composable. The graph is notable for being user-friendly but is not the raw engine ComfyUI is.

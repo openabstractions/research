@@ -1,0 +1,24 @@
+Anthropic
+=========
+
+CATEGORY: cloud API platform / model provider
+LICENSE: n/a closed
+
+WHAT IT IS
+  Frontier model provider (Claude) whose Messages API is the #2 ecosystem standard and the originator of MCP.
+
+ARCHITECTURE / SEAMS
+  Native "Anthropic Messages" format: system + messages[] with content blocks (text/tool_use/thinking) and stop_reason. No first-party OpenAI-compat endpoint; distributes via Claude API, Bedrock, Vertex, Foundry. Created MCP, now the agent-tool layer standard.
+
+STINKS
+  - Expensive output tokens (Fable $50/MTok) and rate-limit/capacity bottlenecks.
+  - No native OpenAI-compat endpoint forces a translation layer in multi-provider apps.
+  - Tokenizer change (+30% tokens) silently raises cost and breaks cache assumptions; tool-use hidden system-prompt cost.
+
+DONE GREAT
+  - Created MCP, adopted across the ecosystem (OpenAI, Google, Groq, OpenRouter).
+  - Extended/adaptive thinking with clean `thinking` block model.
+  - Multi-cloud distribution (Bedrock/Vertex/Foundry) as a strategy.
+
+ABSTRACTION ANGLE
+  The main "counter-format" to OpenAI. An abstraction must translate OpenAI tools <-> tool_use blocks and normalize stop_reason vs finish_reason. Its `thinking` blocks are yet another reasoning representation to unify. Because Anthropic authored MCP, the tool layer converges on MCP above raw model APIs.

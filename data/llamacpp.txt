@@ -1,0 +1,58 @@
+NAME
+llama.cpp
+
+CATEGORY
+Local inference engine / model runner (library + CLI + server)
+
+OFFICIAL SITE
+https://llama.app (project homepage); GitHub https://github.com/ggml-org/llama.cpp
+
+GITHUB REPO
+https://github.com/ggml-org/llama.cpp
+
+LICENSE
+MIT
+
+WHAT IT DOES
+The foundational C/C++ inference engine for LLM/VLM inference with minimal setup and top performance across hardware (local and cloud). Most other local runners (Ollama, LM Studio, GPT4All, Jan, KoboldCpp) are built on it.
+
+TECHNICAL ARCHITECTURE
+- Plain C/C++ with no external runtime dependencies; built on the `ggml` tensor library (https://github.com/ggml-org/ggml).
+- Loads models in GGUF format (single-file weights + metadata/tokenizer). Converts from Hugging Face via convert_hf_to_gguf.py; quantizes via quantize tools.
+- GPU backends via ggml: CUDA (NVIDIA), HIP (AMD), Metal (Apple), Vulkan, SYCL (Intel), MUSA, OpenCL, WebGPU, CANN (Ascend), OpenVINO, ZenDNN, zDNN, RPC (remote device). x86 AVX/AVX2/AVX512/AMX, ARM NEON, RISC-V RVV.
+- Ships multiple tools: `llama-cli` (REPL), `llama-server` (HTTP server), `llama-embedding`, `llama-perplexity`, GBNF grammars; single-header deps (cpp-httplib, nlohmann/json, stb, miniaudio).
+- Supports 1.5-bit through 8-bit quantization, CPU+GPU hybrid inference, multi-GPU, flash attention, speculative decoding, KV-cache quantization, LoRA adapters.
+
+API / PROTOCOLS IT SPEAKS
+- `llama-server` exposes an OpenAI-compatible REST API (/v1/chat/completions, /v1/completions, /v1/embeddings, /v1/models) plus a native extensions API (slots, caching, tokenization, infill, lora, health, etc.).
+- Also a C API (`llama.h` / libllama) and (in newer releases) a gRPC server option; RPC backend for remote compute.
+- Python bindings via llama-cpp-python (community) and official pyproject tooling.
+
+KEY FEATURES
+- Minimal-setup, dependency-free single-file GGUF inference; state-of-the-art CPU + GPU perf.
+- Huge backend matrix (CUDA/HIP/Metal/Vulkan/SYCL/OpenCL/WebGPU/CANN/OpenVINO/Hexagon/RPC).
+- Fine-grained quantization (1.5-8 bit, IQ/K-quants), CPU+GPU split, flash attention, speculative decoding, GBNF grammars / structured output, multimodal (VLM + audio) support.
+- Highly portable: macOS/Windows/Linux/Android/iOS(XCFramework)/RISC-V/IBM Z/WebGPU.
+
+MODEL DOWNLOAD MECHANISM
+- No built-in registry. `llama-cli -hf <repo>` and `llama-serve -hf <repo>` download GGUF directly from Hugging Face (uses HF API). Otherwise users obtain .gguf files manually (Hugging Face, Ollama blobs) or convert/quantize from Safetensors with the included Python scripts. Format: GGUF (primary), legacy GGML, plus conversion from HF/ONNX.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- Raw tool: no package manager/registry, no friendly model manager; users must handle files and flags manually (main friction vs Ollama/LM Studio).
+- Rapid API churn between releases; `llama-server` endpoints and flags change frequently, breaking wrappers.
+- Limited built-in concurrency/serving (no continuous batching like vLLM; parallel slots are a coarse approximation) — not ideal for high-throughput production serving.
+- Heavy compile times and complex build matrix; prebuilt binaries sometimes lag source features.
+- Many long-standing open issues around specific backend regressions (Vulkan/ROCm quality), quant accuracy edge cases, and context-switch bugs.
+
+TOOL CALLING / MCP SUPPORT
+- `llama-server` supports OpenAI-style function calling / tool_calls (tools parameter) and forced JSON output via GBNF grammars / JSON schema; streaming tool calls. Works but is lower-level and more manual than Ollama's UX.
+- MCP: no native MCP support; used indirectly through wrappers/tools that call the OpenAI-compat API. Not a first-class MCP host.
+
+MULTIMODAL SUPPORT
+- Strong VLM support (LLaVA, Qwen-VL, Pixtral, MiniCPM-V, etc.) with image input over the server; recent additions include audio input (multimodal subsystem using miniaudio) and video/audio model families. Text + image + (recent) audio.
+
+RESOURCE MANAGEMENT
+- Manual control: GPU offload via `-ngl/--n-gpu-layers`, VRAM sizing via context length (`-c`) and KV-cache quantization, mmap for lazy model loading, `--no-mmap` to force RAM. No automatic unload (server keeps models resident); concurrency via parallel slots (`-np`). CPU+GPU hybrid inference allows running models larger than VRAM. No cross-app coordination (single process owns resources).
+
+ABSTRACTION HINTS
+- Clear layered design: `ggml` (tensor/backend abstraction — one op interface, many GPU backends) sits below `llama` (model graph/loader/context/KV-cache) which sits below tools (`server`/`cli`). The ggml backend interface is the classic "device abstraction" seam. The OpenAI-compat server layer is a thin adapter over the internal context/slot API — an obvious re-usable provider boundary. GGUF is the de-facto interchange format seam shared across the whole ecosystem.

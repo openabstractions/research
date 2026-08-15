@@ -1,0 +1,38 @@
+NAME
+Cursor
+
+CATEGORY
+Agentic coding IDE
+
+OFFICIAL SITE
+https://cursor.com
+
+GITHUB REPO
+none / closed source (proprietary fork of VS Code; core VS Code source is MIT but Cursor product is closed)
+
+LICENSE
+Closed source / proprietary. Built on a fork of VS Code (MIT core), but Cursor's own agent/runtime is proprietary and not distributed.
+
+WHAT IT DOES
+AI code editor (VS Code fork) with an agentic "Agent"/Composer that plans, searches, edits across files, runs terminal commands, reviews diffs, and orchestrates cloud/background agents.
+
+TECHNICAL ARCHITECTURE
+TypeScript + Electron (VS Code fork). Surfaces: desktop IDE, CLI, web + "Cloud Agents". Agent executes tools: grep (incl. "Instant Grep", ripgrep-based), file read/edit, terminal commands, web fetch, MCP tools. Terminal/command execution is sandboxed via "run modes" + network controls (allow-all / allowlist / deny / no-sandbox); MCP servers get per-server network modes. See https://cursor.com/docs/mcp.
+
+CONTEXT / PROJECT ABSTRACTION
+No single persistent index. Hybrid: (1) grep/Instant Grep for exact + regex; (2) "search by meaning" semantic search over codebase (embeddings); (3) LSP-based symbols/definitions from the editor; (4) @-mentions of files/symbols; (5) "Explore" subagent that runs in a separate context window to parallelize search without bloating main context. No AST/dependency-graph model; relies on search + LSP + model exploration. See https://cursor.com/learn/understanding-your-codebase.
+
+TOOL CALLING / MCP SUPPORT
+Native tools (grep, edit, terminal, web) + full MCP client: stdio, SSE, streamable HTTP; OAuth (dynamic + static client creds); supports MCP Tools/Prompts/Resources/Roots/Elicitation and the "MCP Apps" extension (interactive UI). Programmatic registration via vscode.cursor.mcp.registerServer(). Config in .cursor/mcp.json or ~/.cursor/mcp.json. Also plugins, skills, subagents, hooks, rules. See https://cursor.com/docs/mcp.
+
+PROVIDER SUPPORT
+Anthropic (Claude Opus/Sonnet), OpenAI (GPT), Google (Gemini), xAI (Grok), Cursor's own "Composer" model, plus custom/OpenAI-compatible providers. No first-class local-model support (no Ollama/LM Studio).
+
+KEY FEATURES
+Plan Mode; Agent window; subagents (incl. Explore); checkpoints + diff review; Cloud Agents (Bugbot, security agents, PR routing/approval); background agents; MCP; skills; rules; hooks; CLI (shell mode, headless/CI, ACP); SDK (TypeScript + Python); integrations (Slack, Linear, Jira, GitHub/GitLab/Azure DevOps/Bitbucket, JetBrains, Xcode).
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+Closed source + telemetry/data-collection concerns; usage-based pricing after included credits (common complaint); codebase indexing/context saturation on very large repos; rapid feature churn causing instability; perceived lock-in via proprietary agent loop + marketplace. Sourced from Cursor forum/community and changelog discussions.
+
+ABSTRACTION HINTS
+Clean seams: MCP (tool layer), rules/skills/subagents (instruction/orchestration layer), semantic codebase search + LSP (context layer), run-modes (execution sandbox). The agent loop itself is a monolith inside the proprietary editor (not exposed). Most reusable seams to abstract: the tool-execution protocol (MCP) and the codebase context retrieval (grep + semantic search). 

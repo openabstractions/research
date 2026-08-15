@@ -1,0 +1,55 @@
+NAME
+LangGraph
+
+CATEGORY
+workflow/orchestration (framework/library)
+
+OFFICIAL SITE
+https://www.langchain.com/langgraph (docs: https://docs.langchain.com/oss/python/langgraph/overview)
+
+GITHUB REPO
+Python: https://github.com/langchain-ai/langgraph
+JS/TS: https://github.com/langchain-ai/langgraphjs
+
+LICENSE
+MIT (repo LICENSE).
+
+WHAT IT DOES
+Low-level orchestration framework for building stateful, durable, controllable agents — a graph of nodes (functions) and edges with explicit state, checkpointing, and human-in-the-loop.
+
+TECHNICAL ARCHITECTURE
+- Python and JS/TS library. Inspired by Pregel and Apache Beam; public interface draws from NetworkX.
+- Core model: StateGraph — nodes are functions, edges (normal + conditional) define transitions, shared state is a typed schema with REDUCERS (e.g. append-only message lists); supports cycles/branching/subgraphs.
+- Durable execution: Checkpointer persists state so a run can resume from exactly where it failed (also enables time-travel/replay).
+- Can be used standalone (WITHOUT LangChain); integrates LangChain chat models or any callable.
+- Deployment: LangGraph Platform (LangSmith Deployment) for server/API hosting; LangSmith Studio for visual prototyping.
+
+MODEL FORMAT / ENGINES SUPPORTED
+Model-agnostic — uses LangChain chat models or any callable/function as a node; no local model loading itself.
+
+API / PROTOCOLS IT SPEAKS
+- Library API (Python/TS). Optional Platform exposes a hosted API + streaming + Studio.
+- MCP support built in (load MCP servers as tools). Not itself a standalone server without Platform.
+
+KEY FEATURES
+- Stateful graph agents with typed state + reducers.
+- Durable execution (persist/resume through failures, long-running).
+- Human-in-the-loop: interrupts to inspect/modify state mid-run.
+- Memory: short-term (working) + long-term (cross-session) via checkpointer/store.
+- Subgraphs, conditional routing, parallelism (send API), streaming, checkpointing/time-travel.
+- Tool calling + MCP; evals/observability via LangSmith.
+
+TOOL CALLING / MCP SUPPORT
+Yes — native tool calling in agent nodes and built-in MCP adapter support (LangGraph can load MCP servers as tools).
+
+MULTIMODAL SUPPORT
+Via underlying models only (multimodal LLM inputs); it is an orchestration layer, not a generation engine — no image/video/audio diffusion pipeline.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- Steeper learning curve: "low-level" — more code/boilerplate than LangChain or CrewAI; concepts (reducers, channels, checkpointers) confuse newcomers.
+- Fast-moving API: still maturing; breaking changes across versions.
+- No batteries-included UI; you need LangSmith Studio/Platform (paid) for visual tooling and managed deployment — commercial upsell friction.
+- Overkill for simple RAG/chains (LangChain or Dify is simpler); pick the right abstraction.
+
+ABSTRACTION HINTS
+The most rigorous graph abstraction in the LLM space: explicit typed state + reducers + nodes/edges gives deterministic, inspectable control flow — the reference model for "stateful agent = state machine". Clean points: the state/reducer model and durable checkpointing are principled (Pregel lineage). The abstraction is clean but deliberately low-level; higher-level ergonomics are deferred to Deep Agents / Platform, creating a clean-vs-convenient tradeoff rather than a monolith.

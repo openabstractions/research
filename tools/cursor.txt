@@ -1,0 +1,25 @@
+CURSOR
+=========
+
+CATEGORY: agentic coding IDE
+LICENSE: closed-source / proprietary (VS Code fork; MIT core, proprietary agent/runtime)
+
+WHAT IT IS
+  AI code editor (VS Code fork) with an agentic "Agent"/Composer that plans, edits across files, runs terminals, reviews diffs, and orchestrates cloud/background agents.
+
+ARCHITECTURE / SEAMS
+  No single persistent index: hybrid context via grep/"Instant Grep" (ripgrep), "search by meaning" semantic embeddings, LSP symbols/definitions, and @-mentions; an "Explore" subagent parallelizes search in a separate context window. Tool execution is native tools (grep, edit, terminal, web) plus a full MCP client (stdio/SSE/streamable HTTP, OAuth, MCP Apps), sandboxed via run-modes + network controls. Clean seams: MCP (tool layer), rules/skills/subagents (orchestration), semantic search + LSP (context), run-modes (execution gate). The agent loop itself is a proprietary monolith inside the editor.
+
+STINKS
+  - Agent loop not exposed — proprietary monolith, lock-in via agent + marketplace
+  - No persistent index/AST graph; context saturation on very large repos
+  - Telemetry/data-collection concerns; usage-based pricing friction
+  - Rapid feature churn causing instability
+
+DONE GREAT
+  - Full MCP client incl. OAuth and programmatic vscode.cursor.mcp.registerServer()
+  - Rich parallel-search surface: grep + semantic + LSP + Explore subagent
+  - Checkpoints + diff review; broad integrations (Slack, Linear, GitHub, JetBrains, Xcode)
+
+ABSTRACTION ANGLE
+  Owns the whole IDE + agent layer; both target seams are strong here. Project context = grep + semantic search + LSP (no single index), so a universal standard could absorb a "context provider" protocol combining these. Tool execution = MCP, already the emerging standard. The proprietary agent loop is the part a minimal standard must bypass.

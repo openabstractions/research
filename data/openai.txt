@@ -1,0 +1,63 @@
+NAME
+OpenAI
+
+CATEGORY
+Cloud API platform / model provider (frontier closed models + some open-weight)
+
+OFFICIAL SITE
+https://openai.com / https://platform.openai.com
+
+DOCS URL
+https://platform.openai.com/docs (now served from developers.openai.com; llms.txt at /llms.txt, markdown twins at /api/docs/<slug>.md)
+
+API PROTOCOL / FORMAT
+- The de facto reference standard ("OpenAI format"). Primary: Responses API (/v1/responses). Legacy but still widely copied: Chat Completions (/v1/chat/completions). Deprecated/migrating: Assistants API. Also: Realtime API (WebSocket / WebRTC / SIP), Batch, Embeddings, Images, Videos (Sora), Audio/TTS/STT.
+- SDKs: official openai Python + TypeScript SDKs, OpenAI CLI, Agents SDK (agents). Terraform provider. ChatKit, GPT Actions.
+- This "OpenAI Chat Completions + Responses" shape is the format nearly every competitor mimics.
+
+KEY MODELS
+- GPT-5.6 family (flagship): gpt-5.6-sol ($5/$30 per MTok in/out), gpt-5.6-terra ($2/$12), gpt-5.6-luna ($0.20/$1.20). Context 1.05M tokens, max output 128K. Reasoning levels: none/low/medium/high/xhigh/max. Knowledge cutoff Feb 2026.
+- Older text models: gpt-5.5, gpt-5.4 (mini/nano), gpt-5.2, gpt-5.1, gpt-5 (mini/nano), gpt-4.1 (mini/nano), gpt-4o / 4o-mini.
+- Reasoning o-series: o3-pro ($20/$80), o3 ($2/$8), o4-mini ($1.10/$4.40), o1, o3-mini. (o1-pro was $150/$600.)
+- Realtime/audio: gpt-realtime-2.1 (+ mini), gpt-realtime-2, gpt-audio, gpt-4o-mini-tts.
+- Image: gpt-image-2 / 1.5 / 1-mini. Video: sora-2, sora-2-pro. Transcription: gpt-transcribe, gpt-4o-transcribe, Whisper.
+- Open-weight: gpt-oss-120b, gpt-oss-20b (Apache 2.0). Cyber: gpt-5.6-cyber + Daybreak aliases. Embeddings (text-embedding-3-small/large), moderation (omni-moderation-latest, free).
+- Source: https://platform.openai.com/docs/models and /docs/pricing
+
+TOOL CALLING / FUNCTION CALLING
+- Function calling via Responses API `tools` param (OpenAI-style: type/function/name/parameters JSON Schema). Parallel tool calls supported.
+- Structured Outputs: response_format json_schema with strict=true (constrained decoding). Recommended over plain json_object.
+- Built-in hosted tools: web search, file search, code interpreter, hosted shell, computer use, local shell, apply_patch.
+- Programmatic tool calling + tool search (deferring large tool surfaces / namespaces).
+- MCP: model can use remote MCP servers and OpenAI-maintained connectors; secure MCP tunnel for private servers. Agents SDK supports MCP tools.
+- Edge cases: reasoning models return reasoning tokens/effort; Responses API has an entirely different request/response shape vs Chat Completions (items/output_text vs choices/message).
+
+MULTIMODAL SUPPORT
+Full: text in/out, image in/out (gpt-image), audio in/out (Realtime + TTS/STT), video generation (Sora 2), file inputs. Vision fine-tuning available.
+
+PROTOCOLS / STANDARDS
+- MCP: first-class (hosted MCP servers, connectors, secure tunnel, Agents SDK integration). OpenAI is not the MCP originator but has embraced it heavily.
+- Also: GPT Actions, ChatKit, Agents SDK handoffs, Codex (separate product). A2A not native/not mentioned in API docs.
+- The OpenAI Chat Completions schema IS the ecosystem standard (OpenRouter/Groq/Together/Mistral/DeepSeek all mimic it).
+
+PRICING / COST MODEL
+- Per-token, input/output, with prompt-caching tiers. Flagship gpt-5.6-sol: $5 in / $30 out; cached input $0.50, cache writes $6.25. Batch = 50% off. Flex processing = lower-cost async. Fast mode (service_tier "fast"/"priority") = ~2x premium.
+- Tools billed separately: web search $10/1k calls (reasoning) or $25/1k (non-reasoning); file search $2.50/1k; containers per 20-min session.
+- Fine-tuning platform is WINDING DOWN (no new users); existing FT models served until base deprecation.
+- Source: https://platform.openai.com/docs/pricing
+
+FEATURES
+Prompt caching (auto), Batch API, Flex processing, streaming (SSE), structured outputs, reasoning effort levels, predicted outputs, realtime (WebSocket/WebRTC/SIP), web search/file search/code interpreter, computer use, evals, Agents SDK, fine-tuning (SFT/DPO/RFT, winding down), content provenance/watermarks, workload identity federation, Terraform.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- API surface fragmentation and churn: three chat APIs (Responses vs Chat Completions vs deprecated Assistants), constant model renames/deprecations, fine-tuning platform being sunset.
+- High reasoning/output cost (o1-pro/o3-pro historically $150–$600/MTok output); reasoning tokens add hidden cost.
+- Fast mode/pricing modifiers multiply complexity (cached vs non-cached, short vs long context, regional +10%).
+- Aggressive deprecation cadence forces frequent migration (Assistants -> Responses, GPT-5.4 -> 5.5 -> 5.6).
+- Assistants API migration confusion; Realtime API is a separate non-REST surface.
+
+ABSTRACTION HINTS
+- OpenAI Responses + Chat Completions is the lingua franca. Every aggregator/provider in this study either natively speaks it or ships a compat shim.
+- Two "OpenAI" formats to abstract: legacy Chat Completions (choices[].message) and Responses (output items). A robust abstraction layer must normalize both.
+- Structured outputs (json_schema + strict) set the standard other providers copied (DeepSeek strict mode, Together/Groq json_schema).
+- Divergence point: OpenAI's `reasoning_effort`/reasoning tokens vs Anthropic thinking blocks vs DeepSeek reasoning_content — all need a common "reasoning" abstraction.

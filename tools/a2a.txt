@@ -1,0 +1,25 @@
+A2A
+===
+
+CATEGORY: protocol
+LICENSE: Apache License 2.0 (spec and SDKs)
+
+WHAT IT IS
+  Open standard for independent, opaque agents to discover each other, delegate tasks, stream progress, and exchange results without sharing internal state — complements MCP (agent-to-tool).
+
+ARCHITECTURE / SEAMS
+  Three normative layers: (1) canonical data model in Protocol Buffers (a2a.proto is the single source of truth, JSON derived); (2) abstract operations (SendMessage, GetTask, ListTasks, CancelTask, SubscribeToTask...); (3) protocol bindings mapping ops to JSON-RPC, gRPC, and HTTP+JSON/REST. Core concepts: Agent Card (JSON identity/capabilities/skills/endpoint/security), Message, Task (stateful lifecycle), Part, Artifact. Async-first, human-in-the-loop. Auth via OAuth2/OIDC/API-key/mTLS declared in the Agent Card. SDKs in 6 languages.
+
+STINKS
+  - More complex than MCP: three bindings + proto-as-source + task lifecycle + push notifications raises the implementation bar and slows adoption.
+  - Younger, less battle-tested; fewer production deployments; nascent ecosystem.
+  - v0.x -> v1.0 breaking changes (removed "kind" discriminator, relocated Agent Card fields) churned early adopters.
+  - Thin discovery story; ambiguous/overlapping relationship to MCP confuses teams about whether they need both.
+
+DONE GREAT
+  - Clean layering: transport-neutral proto data model separated from abstract operations and from concrete bindings — new bindings without changing semantics.
+  - Modern governance: single-vendor (Google) -> Linux Foundation -> multi-vendor TSC + proto-as-source + deprecation lifecycle.
+  - Strategic positioning as MCP's complement (agent-to-agent vs agent-to-tool) avoided a standards war.
+
+ABSTRACTION ANGLE
+  The strongest design teaching is the three-layer split (canonical proto model / abstract ops / concrete bindings) — the pattern to copy for any multi-transport standard. The struggle is complexity: richer async-first stateful semantics cost adoption versus MCP's minimal surface. Lesson for a universal abstraction: win on minimal surface area, use a single machine-readable source of truth with a neutral multi-vendor TSC, and position clearly as complement rather than competitor to adjacent standards.

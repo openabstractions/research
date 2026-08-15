@@ -1,0 +1,23 @@
+Invoke (formerly InvokeAI)
+=========
+
+CATEGORY: creative/generation
+LICENSE: Apache-2.0
+
+WHAT IT IS
+  Professional creative engine / web UI for Stable Diffusion-family image generation with a signature Unified Canvas, layered over an optional node-based workflow system; OSS foundation for Invoke's commercial products.
+
+ARCHITECTURE / SEAMS
+  Two-layer abstraction: a curated app layer (forms + Unified Canvas) sitting on a typed node-graph workflow editor. Architecturally a web-server model — invoker + session queue + event bus (Redis), SQLite for board/gallery metadata — rather than a Gradio single-user app. Cleaner than ComfyUI (services, typed nodes, DB) but more opinionated and less raw/composable.
+
+STINKS
+  - Heavier install/run than A1111/ComfyUI (launcher + many deps, Docker recommended).
+  - Model support lags ComfyUI; smaller custom-node ecosystem; node graph less raw/flexible.
+  - Commercialization tension: features increasingly gated behind the paid product; OSS tier perceived as a funnel.
+
+DONE GREAT
+  - Unified Canvas + board/gallery metadata recall is a genuinely product-grade editing abstraction.
+  - Both form UI and node graph are first-class, with the graph visually editable — a clean dual abstraction.
+
+ABSTRACTION ANGLE
+  Interesting for showing a curated "app" abstraction sitting on top of a typed node graph. The graph is user-friendly but not the raw engine ComfyUI is — a case study in a node-graph that trades composability for product ergonomics. A universal standard could absorb its typed-node + metadata/board concepts, but its graph layer is less canonical than ComfyUI's.

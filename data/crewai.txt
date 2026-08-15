@@ -1,0 +1,54 @@
+NAME
+CrewAI
+
+CATEGORY
+workflow/orchestration (framework/library)
+
+OFFICIAL SITE
+https://www.crewai.com (docs: https://docs.crewai.com)
+
+GITHUB REPO
+https://github.com/crewAIInc/crewAI
+
+LICENSE
+MIT (repo LICENSE).
+
+WHAT IT DOES
+Python framework for role-based multi-agent orchestration: autonomous agent teams ("Crews") plus deterministic event-driven workflows ("Flows") for production agentic automation.
+
+TECHNICAL ARCHITECTURE
+- Python package (managed via uv). Primitives: Agent, Task, Crew, Process (sequential/hierarchical), Flow.
+- Crews: role/goal/backstory agents that delegate and collaborate; tasks with expected outputs, dependencies, structured output (Pydantic/JSON).
+- Flows: event-driven control with decorators (@start, @listen, @router) and Pydantic-typed state; logical combinators (or_/and_); deterministic branching.
+- Config often in YAML (agents.yaml/tasks.yaml); `crewai create crew` CLI scaffolds a project.
+- LLM access via LiteLLM under the hood (many providers); telemetry via OpenTelemetry (opt-out with OTEL_SDK_DISABLED=true).
+
+MODEL FORMAT / ENGINES SUPPORTED
+Model-agnostic via LiteLLM: OpenAI, Anthropic, Google, plus local via Ollama / LM Studio; supports custom/fine-tuned models. Not a model runner.
+
+API / PROTOCOLS IT SPEAKS
+- Library API (Python). Commercial "CrewAI AMP" / Control Plane adds managed deployment, tracing/observability, governance (cloud or on-prem).
+- MCP and A2A (Agent2Agent) support for tools/interop; docs exposed via an MCP server.
+
+KEY FEATURES
+- Role-based autonomous agents (Crews) with delegation; sequential or hierarchical (manager) process.
+- Flows for precise, event-driven, conditional orchestration; combine Crews + Flows.
+- Tools, memory, knowledge (RAG), human-in-the-loop (human input on execution), checkpointing, async execution.
+- Structured outputs (output_pydantic/output_json), guardrails.
+- MCP/A2A support; telemetry; agent "skills" for AI coding agents.
+
+TOOL CALLING / MCP SUPPORT
+Yes — native tool use on agents, plus MCP and A2A support; also publishes a CrewAI docs MCP server.
+
+MULTIMODAL SUPPORT
+Limited: primarily LLM/text agents; can call external tools for image/audio but no native multimodal generation pipeline. Not a diffusion engine.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- Telemetry ON by default (anonymous usage data; opt-out via env var) — privacy concern.
+- Multi-agent nondeterminism: autonomy = harder to debug, unpredictable costs, loops/hallucinated delegation.
+- High-level abstractions hide internals ("magic") — hard to reason about exactly what the agents do.
+- Commercial push: advanced observability/deployment gated behind paid AMP/Control Plane.
+- Compared to LangGraph, less rigorous control-flow semantics; some view role-based model as gimmicky/oversimplified.
+
+ABSTRACTION HINTS
+Two clean, opinionated abstractions: Crews (high-level role/task/crew — intuitive, "team of workers" metaphor) and Flows (lower-level event-driven graph with typed state). The Crew abstraction is elegant for quick multi-agent setups but "leaky" (delegation/manager behavior is emergent, not explicit). Flows provide the deterministic complement, giving the framework a clean autonomy-vs-control split. The tradeoff vs LangGraph: more ergonomic and intuitive, less principled/precise state semantics.

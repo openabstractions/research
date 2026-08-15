@@ -1,0 +1,25 @@
+SILLYTAVERN
+===========
+
+CATEGORY: frontend
+LICENSE: AGPL-3.0 (fork of TavernAI, MIT)
+
+WHAT IT IS
+  Local web UI unifying many LLM backends for character/roleplay chat, with image gen, TTS and heavy prompt control.
+
+ARCHITECTURE / SEAMS
+  Node.js Express server (server.js) + plain-JS jQuery single-page client (no framework). Clean seams: src/endpoints/ backend adapters (one module per API); extensions API; World Info/lorebook + prompt manager as content-injection layer. Monolith seams: large server.js; prompt templating and chat logic interwoven with UI globals; no framework boundaries in the client. No DB by default — JSON files.
+
+STINKS
+  - AGPL-3.0 copyleft — red flag for commercial reuse/hosting.
+  - Roleplay-first, steep learning curve; not a general productivity UI.
+  - Single-user by design, no official auth; XSS/security concerns raised.
+  - Legacy jQuery/plain-JS frontend hard to refactor; extensions break across releases.
+
+DONE GREAT
+  - src/endpoints/ adapter modules are a clean, minimal provider boundary.
+  - Minimal deps, runs anywhere on Node 20+.
+  - Extensions API + lorebook/World Info content-injection layer.
+
+ABSTRACTION ANGLE
+  Occupies the client layer plus a content-injection (context) layer. It implies the same provider-adapter seam as the others (src/endpoints/) but is not a general-purpose standard candidate given the roleplay focus. What we'd extract: the backend-adapter interface and the prompt/content-injection layer; the rest is domain-specific frontend.

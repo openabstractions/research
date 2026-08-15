@@ -1,0 +1,24 @@
+GPT4ALL
+=======
+
+CATEGORY: local inference engine
+LICENSE: MIT (repo); Nomic models may carry their own licenses
+
+WHAT IT IS
+  User-friendly desktop app + Python SDK for running open LLMs privately on CPU-only hardware, plus a bundled LocalDocs feature for private RAG over local documents.
+
+ARCHITECTURE / SEAMS
+  Monorepo with a textbook layering: gpt4all-backend (C/C++ wrapping llama.cpp/ggml) exposed through gpt4all-bindings (C/C++/Python/Node), consumed by both the Qt GUI and the Python SDK. LocalDocs is a separate RAG layer over the embeddings API.
+
+STINKS
+  - Slow cadence, pinned llama.cpp often versions behind; newest models/quants fail to load.
+  - OpenAI-compat server (gpt4all-api) effectively unmaintained; GUI-only, no robust local server story.
+  - Weak GPU support (Vulkan Q4_0/Q4_1 only); no tool calling or MCP.
+
+DONE GREAT
+  - Runs well on everyday CPU-only hardware; simple in-app model download.
+  - Clean backend/bindings/GUI seam; LocalDocs RAG is an elegant layered addition.
+  - LangChain/Weaviate/OpenLIT integrations.
+
+ABSTRACTION ANGLE
+  Owns compute backend (wrapped) + client; the bindings layer is the reusable engine seam, and the Python GPT4All object is a lightweight provider interface. A universal standard would extract the bindings/embeddings seam as the compute+capability contract — but GPT4All is a cautionary case: its lack of a maintained server surface and tool-calling shows how a runner without a communication/tooling seam drops out of the agent ecosystem.

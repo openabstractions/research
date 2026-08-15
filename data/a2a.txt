@@ -1,0 +1,56 @@
+NAME
+A2A (Agent2Agent Protocol)
+
+CATEGORY
+protocol (open standard for agent-to-agent communication/interoperability)
+
+OFFICIAL SITE
+https://a2a-protocol.org
+Spec: https://a2a-protocol.org/latest/specification/
+
+GITHUB REPO
+Spec: https://github.com/a2aproject/A2A
+SDKs: a2a-python, a2a-js, a2a-java, a2a-dotnet, a2a-go, a2a-rs (github.com/a2aproject/)
+
+LICENSE
+Apache License 2.0 (specification and SDKs)
+
+WHAT IT DOES
+Defines how independent, opaque agents (built on different frameworks/vendors) discover each other, delegate tasks, stream progress, and exchange results — without sharing internal state or tools. Complements MCP (agent-to-tool).
+
+TECHNICAL ARCHITECTURE
+- Three normative layers: (1) Canonical Data Model defined in Protocol Buffers (a2a.proto is the single authoritative source; JSON derived); (2) Abstract Operations (SendMessage, SendStreamingMessage, GetTask, ListTasks, CancelTask, SubscribeToTask, push-notification config, GetExtendedAgentCard); (3) Protocol Bindings mapping those operations to concrete transports: JSON-RPC, gRPC, and HTTP+JSON/REST (plus custom bindings).
+- Core concepts: Agent Card (JSON document describing identity/capabilities/skills/endpoint/security), Message (role + Parts), Task (stateful unit of work with lifecycle states), Part (smallest content unit: text/file/structured data), Artifact (agent output), streaming events, push notifications.
+- Async-first: tasks are long-running and stateful (submitted -> working -> completed/failed/canceled/rejected), supporting human-in-the-loop.
+- Security: standard web auth — OAuth2/OIDC/API-key/mTLS security schemes declared in the Agent Card; opaque execution (agents share capabilities, not internals).
+- Language: language-neutral; official SDKs in Python, JavaScript, Java, C#/.NET, Go, Rust.
+
+FORMATS / STANDARDS IT DEFINES
+- a2a.proto (protobuf) as the normative data model; generated JSON (a2a.json) as a build artifact.
+- Agent Card JSON metadata document (+ Agent Card signing/verification); media type application/a2a+json; HTTP headers A2A-Version / A2A-Extensions; well-known URI for discovery.
+
+API / PROTOCOLS
+- Abstract operations mapped to JSON-RPC methods, gRPC RPCs, and REST endpoints; SSE-style streaming for JSON-RPC/HTTP; webhooks for push notifications.
+- Version negotiation, extension declaration, and custom binding registry.
+
+KEY FEATURES
+- Interoperability across agent frameworks (LangGraph, CrewAI, Semantic Kernel, ADK, custom).
+- Async-first task lifecycle with streaming + push notifications; modality-agnostic Parts (text/files/structured data/UI refs).
+- Enterprise focus: authentication/authorization, multi-tenancy, idempotency, opaque IP-safe execution.
+- Extension mechanism with tiered promotion governance to keep the core stable.
+
+ADOPTION STATUS
+- Developed by Google (April 2025), donated to the Linux Foundation; maintained by a Technical Steering Committee (AWS, Cisco, Google, IBM Research, Microsoft, Salesforce, SAP, ServiceNow). v1.0 released.
+- Rapidly growing but notably behind MCP in raw adoption; supported by 50+ partners and major cloud/framework players; SDKs in 6 languages; integrations with LangGraph, CrewAI, etc.
+- Positioning is clear and complementary to MCP (MCP = agent-to-tool, A2A = agent-to-agent), which avoids direct head-to-head competition.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- Younger and less battle-tested than MCP; fewer real production deployments; ecosystem still nascent.
+- Spec is more complex than MCP (three bindings, proto-as-source-of-truth, task lifecycle, push notifications), which raises the implementation bar and slows adoption.
+- The v0.x -> v1.0 transition had breaking changes (e.g., "kind" discriminator removed, extended Agent Card field relocated), churning early adopters.
+- Discovery (how clients find agents) is still thin relative to the rest of the spec; overlapping/ambiguous relationship to MCP causes confusion in practice (many teams unclear whether they need both).
+
+ABSTRACTION HINTS
+- The strongest design teaching here is layering: a canonical transport-neutral data model (proto) separated from abstract operations and from concrete bindings (JSON-RPC/gRPC/REST). This lets new bindings be added without changing semantics — a robust pattern for any multi-transport standard.
+- Its struggle is complexity: async-first, stateful task semantics and three bindings make it harder to adopt than MCP's "three primitives over JSON-RPC." The lesson: standards win by minimizing surface area; richer semantics (stateful tasks) cost adoption.
+- Governance is the modern model to copy: single-vendor creation (Google) -> neutral foundation (Linux Foundation) -> multi-vendor TSC + proto-as-source-of-truth + deprecation lifecycle. Clear positioning vs MCP (complement, not competitor) is itself a strategic lesson in avoiding a standards war.

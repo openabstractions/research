@@ -1,0 +1,53 @@
+NAME
+n8n
+
+CATEGORY
+workflow/orchestration
+
+OFFICIAL SITE
+https://n8n.io (cloud: https://app.n8n.cloud, docs: https://docs.n8n.io)
+
+GITHUB REPO
+https://github.com/n8n-io/n8n
+
+LICENSE
+NOT open source. "Sustainable Use License" v1.0 (fair-code) + "n8n Enterprise License" for `.ee.`-marked files. Sustainable Use License permits internal business use, modification, and free non-commercial redistribution, but you may NOT distribute/provide the software as a service to third parties for a fee, nor use it to build a competing hosted product (effectively no SaaS/white-label). `.ee.` files (advanced enterprise features) require a paid Enterprise License. Red flag: source-available, not OSI-approved. (https://github.com/n8n-io/n8n/blob/master/LICENSE.md)
+
+WHAT IT DOES
+Fair-code workflow automation platform: build/deploy AI agents and multi-step workflows on a visual node canvas combined with custom code, connecting 1500+ integrations, self-hosted or cloud.
+
+TECHNICAL ARCHITECTURE
+- TypeScript/Node.js monorepo (pnpm + turbo), Express backend, React/Vue frontend editor.
+- Workflow model: a directed graph of "nodes" with typed input/output; data flows as "items" between nodes. Nodes = thin adapters (triggers/actions) to external services.
+- Execution: main process + worker/queue modes (Redis) for scaling; SQLite (default) or PostgreSQL for state; Docker-first deployment.
+- AI layer: "AI Agent" node (based on LangChain under the hood) plus LLM nodes; supports code nodes (JavaScript) and Python in advanced AI workflows.
+
+MODEL FORMAT / ENGINES SUPPORTED
+Not a model runner. Connects to LLM providers: OpenAI, Anthropic, Google (Gemini/Vertex), Azure, and open-source/local via Ollama / LM Studio / OpenAI-compatible endpoints. Model provider is swappable without architecture change ("no lock-in").
+
+API / PROTOCOLS IT SPEAKS
+- REST API (internal), webhooks (in/out), and node-specific protocols across 1500+ integrations (HTTP, GraphQL, gRPC via nodes, email, etc.).
+- Can be triggered via CLI, queue, cron, and expose its own endpoints; MCP server trigger exposes n8n workflows as an MCP server.
+
+KEY FEATURES
+- Visual node editor + code nodes (JS/Python) + npm packages in nodes.
+- 1500+ integrations and 9,000+ workflow templates.
+- AI-native: AI Agent node with tool calling, multi-step agents, human-approval steps, observability.
+- Self-host (Docker/npx) or cloud; RBAC, audit trails, SSO (mostly enterprise).
+- Fair-code / source-available model; enterprise license for advanced features.
+
+TOOL CALLING / MCP SUPPORT
+Native and strong: n8n is both an MCP CLIENT (MCP Client tool node to call external MCP servers) and an MCP SERVER (MCP Server Trigger exposes a workflow as an MCP tool). AI Agent nodes do tool calling natively. (repo topics: mcp, mcp-client, mcp-server)
+
+MULTIMODAL SUPPORT
+Indirect: orchestrates external services (image/video/audio via AI model tools, OpenAI image generation, etc.) but has no native image/video/audio generation engine. It composes LLM + 1500 services, not diffusion models.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- License controversy: not OSI open source; Sustainable Use License forbids offering it as a hosted/commercial service to others — a dealbreaker for SaaS resellers; enterprise features locked behind paid `.ee.` files.
+- Fair-code confusion/trust: users historically felt misled by the shift away from a pure OSS license.
+- Enterprise features (SSO, some scaling, external secrets) are gated in the paid tier.
+- Complexity/performance at scale: many nodes + large payloads can be slow; queue/worker setup needed for production concurrency.
+- Fast-moving AI features (AI Agent node, MCP) have broken/changed quickly; versioning of workflows/export has gaps.
+
+ABSTRACTION HINTS
+Uniform node abstraction — everything (from a Slack action to an LLM call) is a node with typed parameters; this uniformity is the strength, but nodes are shallow adapters with business logic embedded per-node. Data-flow model (list of "items" between nodes) is a clean, simple contract. The AI layer is bolted on top (LangChain inside the AI Agent node) rather than deeply integrated. Clean graph/data model; monolith in the single large TS monorepo with packages split by concern.

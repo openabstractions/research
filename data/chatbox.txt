@@ -1,0 +1,39 @@
+NAME: Chatbox (Community Edition)
+
+CATEGORY: client (native desktop app + web + mobile; "AI client")
+
+OFFICIAL SITE: https://chatboxai.app
+
+GITHUB REPO: https://github.com/chatboxai/chatbox (open-sourced again under GPLv3 — see issue #2266)
+
+LICENSE: GPL-3.0 (Community Edition). A separate closed-source "Pro" repo exists that syncs features back/forth; chatbox.ai cloud (team sharing) is closed.
+
+WHAT IT DOES: Desktop/mobile AI chat client for ChatGPT, Claude, Gemini, and local/other LLMs — a thin client that stores your API keys locally and talks directly to providers.
+
+TECHNICAL ARCHITECTURE:
+- Electron + React + TypeScript. Clear split: `src/main` (Electron main), `src/renderer` (React UI), `src/preload`, `src/shared`. Also `vite.config.web.ts` for a web build + iOS/Android builds.
+- Local-first: data/keys stored on device; no server required. Connects directly to each provider's API from the client.
+- Community Edition is the open repo; Pro features (some team/sync) live in a closed repo that the team syncs.
+
+PROVIDERS / MODELS SUPPORTED: OpenAI (ChatGPT), Azure OpenAI, Claude/Anthropic, Google Gemini, Ollama (local models), ChatGLM-6B, DeepSeek, LM Studio, and generic OpenAI-compatible custom endpoints (base URL + key).
+
+API / PROTOCOLS IT SPEAKS:
+- Consumes: OpenAI-compatible API (primary) plus provider-specific adapters; MCP (client, since v1.14).
+
+KEY FEATURES: Local data storage / privacy; no-deployment installers (Win/macOS/Linux, iOS/Android, web); markdown + LaTeX + code highlight; prompt library; message quoting; streaming; DALL-E-3 image generation; team collaboration (cloud); i18n (9+ languages); MCP support.
+
+TOOL CALLING / MCP SUPPORT:
+- MCP support added in v1.14 — configure MCP servers in Settings and call MCP tools in conversations; one-click `chatbox://mcp/install?server=<base64>` deep-link install. Function calling is otherwise limited (no rich agent/tool framework — it leans on MCP for tools).
+- DeepSeek reasoning display: works but has occasional rendering/thinking-token quirks reported in issues.
+
+MULTIMODAL SUPPORT: Partial — image generation (DALL-E-3); image input/vision is limited/provider-dependent.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS:
+- GPL-3.0 is a red flag for commercial embedding/derivative work.
+- Community vs Pro split: feature parity gap, sync/team features paywalled to chatbox.ai cloud; ~1.1k open issues.
+- Only a client (no RAG server, no multi-user self-host, no agents beyond MCP) — thin by design.
+- Provider adapter coverage lags new model/API features (e.g., OpenAI Responses API, vision nuances).
+
+ABSTRACTION HINTS:
+- Clean seams: Electron main/preload/renderer split; `src/shared` utilities; provider adapters (model definitions) are a natural "provider gateway" boundary; MCP client runtime is a separable tool layer.
+- Monolith seams: renderer is a large React app; provider/model config coupled to UI state.

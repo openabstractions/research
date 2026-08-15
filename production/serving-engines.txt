@@ -1,0 +1,84 @@
+SERVING ENGINES (the "pro" inference runtimes)
+=============================================
+
+Shared techniques (every serious engine implements these; they are the baseline,
+NOT differentiators):
+- Continuous (in-flight) batching: new requests are admitted into the running batch
+  as soon as they arrive instead of waiting for the whole batch to finish. This is
+  the single biggest throughput win, ~23x throughput vs static batching while
+  reducing p50 latency.
+  Source: https://www.anyscale.com/blog/continuous-batching-llm-inference
+- PagedAttention: KV cache is stored in non-contiguous "pages" (blocks), like OS
+  virtual memory, eliminating fragmentation and enabling KV sharing across requests
+  (e.g. beam search, parallel sampling). vLLM paper, SOSP 2023.
+  Source: https://arxiv.org/abs/2309.06180
+- Prefix caching: cache the KV of the shared prompt prefix (system prompts, few-shot
+  examples, agent history) and reuse across requests. Huge win for chat/agent/RAG.
+- Quantized weight formats (AWQ/GPTQ/FP8/INT4/INT8) and speculative decoding.
+
+--------------------------------------------------------------------------
+
+vLLM (Berkeley / Sky Computing Lab; now the de-facto open standard)
+- GPU-agnostic (NVIDIA/AMD/Intel/TPU/NPU). OpenAI-compatible API + Anthropic Messages
+  API + gRPC. 200+ model architectures.
+- v1 engine (2025) rewrote the scheduler: "zero-overhead" async core, split prefill/
+  decode, disaggregated serving, CUDA graphs, dual-batch overlap, hybrid KV manager.
+- Distributed parallelism: tensor, pipeline, data, expert, context parallel.
+- Multi-LoRA batching (Punica), structured output (xgrammar), n-gram/EAGLE/DFlash
+  speculative decoding, chunked prefill.
+- Docs: https://docs.vllm.ai/en/latest/  Paper: https://arxiv.org/abs/2309.06180
+- Performance positioning: near-SOTA throughput, best-in-class model coverage and
+  ecosystem; slightly behind SGLang on some agentic/long-context workloads.
+
+TensorRT-LLM (NVIDIA)
+- NVIDIA-only, hardware-locked; lowest-latency / highest raw throughput on NVIDIA by
+  compiling the model into CUDA graphs and fused kernels (TRT "engine" / LLM API).
+- Architected on PyTorch now (fully open-sourced 2025). Features: in-flight batching,
+  paged KV cache, FP8/FP4/INT4 quantization, n-gram + MTP speculative decoding,
+  disaggregated prefill/decode, expert parallelism (EP), XQA/FlashAttention/MultiBlock
+  attention kernels, weight-stripped engines (99% size reduction).
+- Sits under NVIDIA Dynamo (datacenter distributed scheduler) and Triton Inference
+  Server. DeepSeek/Llama/GPT-OSS day-0 support; world-record DeepSeek-R1 numbers.
+- Repo: https://github.com/NVIDIA/TensorRT-LLM
+  Blogs: https://nvidia.github.io/TensorRT-LLM/blogs/
+- Trade-off: compile step / tighter hardware coupling = more ops friction, but lower
+  per-token cost at scale (what Bing/Databricks/Baseten use).
+
+TGI - HuggingFace Text Generation Inference (Rust + Python)
+- NOTE: now in maintenance mode (2025+). HF explicitly recommends vLLM/SGLang going
+  forward. Historically important: the first to popularize continuous batching in a
+  turnkey server, plus safetensors loading, tensor parallelism, SSE streaming, GPTQ/
+  bitsandbytes quantization, OpenTelemetry tracing + Prometheus metrics, logits
+  warpers, stop sequences, logprobs, "guidance" for constrained/structured output.
+- Repo: https://github.com/huggingface/text-generation-inference
+- Relevance: proves the feature checklist a production server must expose (metrics,
+  tracing, constrained decoding) even if its engine is no longer competitive.
+
+SGLang (LMSYS; used by xAI, Cursor, LinkedIn, Meta, Baidu, etc.)
+- Fastest-growing engine, "de facto industry standard", >400k GPUs deployed.
+- Signature: RadixAttention (radix-tree prefix caching that shares KV across the whole
+  tree of shared prefixes, not just exact-prefix), zero-overhead CPU scheduler,
+  compressed-FSM for 3x faster structured/JSON decoding, prefill-decode (PD)
+  disaggregation, large-scale expert parallelism (DeepSeek MoE on 96+ GPUs),
+  speculative decoding (EAGLE/DFlash), chunked prefill, FP4/FP8/AWQ/GPTQ.
+- Key differentiator vs vLLM: prefix cache is a radix tree (system-prompt + per-user
+  branches), and PD disaggregation gives ~2-4x decode throughput on DeepSeek.
+- Repo: https://github.com/sgl-project/sglang  Blogs: https://lmsys.org/blog/
+
+LMDeploy (InternLM / OpenMMLab; TurboMind + PyTorch engines)
+- Two engines: TurboMind (C++/CUDA, max perf, persistent batch / continuous batching,
+  blocked KV cache, dynamic split-fuse) and PyTorch engine (portability).
+- Claims up to 1.8x vLLM request throughput via persistent batching; 2.4x FP16
+  speedup with 4-bit AWQ; supports KV cache INT8/INT4 quantization, automatic prefix
+  caching, and a multi-model proxy/request-distribution server.
+- Strong on China ecosystem (DeepSeek, Qwen, InternLM, GLM) and Ascend NPUs.
+- Repo: https://github.com/InternLM/lmdeploy
+
+Performance differences (qualitative, workload-dependent):
+- Raw tokens/sec at fixed latency budget: TensorRT-LLM >= SGLang/vLLM > TGI > naive.
+- Long-context / agentic / shared-prefix workloads: SGLang (radix cache, PD) usually
+  leads; vLLM close.
+- MoE models (DeepSeek/Mixtral): SGLang + TRT-LLM lead via expert parallelism; vLLM
+  close behind.
+- Model coverage & ease of use: vLLM > SGLang > TRT-LLM (needs per-model build).
+- There is no single winner; providers run several and route per model.

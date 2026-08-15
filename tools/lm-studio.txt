@@ -1,0 +1,24 @@
+LM STUDIO
+=========
+
+CATEGORY: local inference engine
+LICENSE: proprietary (freeware) core; MIT SDKs (lmstudio-js, lmstudio-python) and lms CLI
+
+WHAT IT IS
+  Polished Electron desktop app for discovering, downloading, chatting with, and serving local LLMs offline, doubling as a local OpenAI-compatible server for developers.
+
+ARCHITECTURE / SEAMS
+  Electron shell + React UI over a closed-source runtime built on llama.cpp (CUDA/Vulkan) and MLX. The local HTTP server (OpenAI-compat + JSON-RPC) is the only public seam; models live in a user cache folder with Hugging Face as the discovery/download backend.
+
+STINKS
+  - Closed-source inference core: unauditable, unlike peers.
+  - API churn (port 1234 -> JSON-RPC/lms) breaks integrations across versions.
+  - No headless/Docker first-class story; single-desktop, no multi-user/auth; Electron resource overhead.
+
+DONE GREAT
+  - Best-in-class non-expert UX for local model discovery/download/chat.
+  - Rich SDKs expose load/unload, GPU/context config, speculative decoding — beyond what OpenAI clients express.
+  - First-class Apple Silicon via MLX; strong tool calling and MCP support.
+
+ABSTRACTION ANGLE
+  Owns compute backend + client + a thin hosting seam, all hidden behind an opaque-but-stable OpenAI-compat server boundary. The SDK's extra load/unload/config operations reveal a resource-arbiter API that generic OpenAI clients cannot express — exactly the gap a universal hosting/resource-arbiter standard should fill, while treating the runtime itself as a black-box provider.

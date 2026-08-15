@@ -1,0 +1,24 @@
+VLLM
+====
+
+CATEGORY: local inference engine
+LICENSE: Apache-2.0
+
+WHAT IT IS
+  High-throughput, memory-efficient production serving engine for GPU servers; pioneered PagedAttention and continuous batching to maximize tokens/sec and GPU utilization under concurrent load.
+
+ARCHITECTURE / SEAMS
+  Python (torch) with C++/CUDA kernels and an emerging Rust layer. Clean internal seams: model-registry abstraction (200+ HF architectures), ModelRunner/executor over many hardware platforms, pluggable attention backends, and quantization as a pluggable layer. OpenAI/Anthropic/gRPC front-ends are thin adapters over one engine; LLM/AsyncLLMEngine is the embed-vs-serve seam.
+
+STINKS
+  - Heavy install/build and version-pinned torch/CUDA friction.
+  - Requires GPU to shine; overkill for single-user local use.
+  - Fast-moving API, frequent regressions; nontrivial memory/throughput tuning.
+
+DONE GREAT
+  - Best-in-class throughput and GPU memory efficiency (PagedAttention, continuous batching, prefix caching).
+  - Huge hardware platform coverage and 200+ model families.
+  - Clean model-registry and attention-backend abstractions.
+
+ABSTRACTION ANGLE
+  Pure compute backend (highest-fidelity serving) + a thin communication adapter; owns no acquisition/registry or client. The embed-vs-serve seam (Python engine object vs OpenAI-compat server) is the canonical backend contract a universal standard should target — vLLM is the ideal high-throughput backend behind any unified runner, absorbing the compute-backend and resource-arbiter (KV-cache/memory) layers while leaving acquisition and client to others.

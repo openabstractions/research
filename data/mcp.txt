@@ -1,0 +1,55 @@
+NAME
+MCP (Model Context Protocol)
+
+CATEGORY
+protocol (open standard for connecting AI apps/agents to external tools, data, and resources)
+
+OFFICIAL SITE
+https://modelcontextprotocol.io
+Spec: https://modelcontextprotocol.io/specification/
+
+GITHUB REPO
+Spec + docs: https://github.com/modelcontextprotocol/modelcontextprotocol
+SDKs (TypeScript/Python/etc.): https://github.com/modelcontextprotocol/
+
+LICENSE
+MIT License (specification, schema, and official SDKs)
+
+WHAT IT DOES
+Standardizes how AI applications (hosts like Claude, ChatGPT, IDEs) discover and invoke external capabilities — tools, resources, and prompts — exposed by servers. Described as "USB-C for AI".
+
+TECHNICAL ARCHITECTURE
+- Client/server over JSON-RPC 2.0. An MCP "host" (the AI app) runs one or more "clients"; each client maintains a 1:1 connection to an MCP "server" exposing primitives.
+- Three server primitives: Tools (model-invokable functions), Resources (context/data the model reads, URI-addressable), Prompts (reusable prompt templates). Two client primitives: Sampling (server asks the model to generate) and Roots (filesystem scope hints).
+- Transport layer is pluggable: stdio (local subprocess), and streamable HTTP (SSE-based) for remote; HTTP transport uses OAuth 2.1-based authorization (RFC 8707 resource indicators, dynamic client registration).
+- Lifecycle: initialize/capability negotiation/notifications. The spec's source of truth is a TypeScript schema (schema.ts), auto-generated to JSON Schema (schema.json).
+- Language: language-neutral; reference SDKs in TypeScript and Python (plus many community SDKs).
+
+FORMATS / STANDARDS IT DEFINES
+- JSON-RPC 2.0 message envelope (requests, responses, notifications) with defined methods (initialize, tools/list, tools/call, resources/read, prompts/get, etc.).
+- TypeScript schema that doubles as the machine-readable protocol definition; JSON Schema derivation.
+- Resource URI scheme (resource:// and custom schemes); content types for resources.
+
+API / PROTOCOLS
+- JSON-RPC 2.0 methods over stdio or streamable HTTP (SSE); OAuth 2.1 authorization for HTTP; tool input is JSON Schema (untyped or typed).
+- SDKs: @modelcontextprotocol/sdk (TypeScript), mcp (Python SDK), plus C#, Java, Kotlin, Go, Rust, Swift, PHP community SDKs.
+
+KEY FEATURES
+- Tool/Resource/Prompt primitives; capability negotiation; sampling; roots; logging; completion.
+- One protocol, many hosts/servers: build a server once, use it from Claude, ChatGPT, VS Code, Cursor, etc.
+- Extensible via a specification change process (SEPs - specification enhancement proposals).
+
+ADOPTION STATUS
+- Created by Anthropic (Nov 2024), open-sourced, then donated to a neutral foundation (announced with broad industry support); adopted rapidly across vendors. Hosts/clients: Claude (Claude Code, desktop), OpenAI ChatGPT/Agents SDK, Google (Gemini/ADK), Microsoft (VS Code Copilot, Copilot Studio), Cursor, and many IDEs. Servers number in the thousands (database, search, browser, dev tools). GitHub even added a built-in "MCP Registry" (github.com/mcp).
+- De-facto standard for agent-to-tool integration; likely the fastest-adopted AI protocol to date.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- Security: tool calls are prompt-injectable; no built-in consent/danger rating beyond basic auth; running third-party servers with ambient credentials is risky (frequent security criticisms).
+- Transport/auth churn: original HTTP+SSE transport was replaced by "streamable HTTP", and auth is still evolving (OAuth 2.1) — early adopters hit breaking changes.
+- Capability/fragmentation concerns: broad vendor "MCP support" is uneven; primitives (tools vs resources vs prompts) are implemented inconsistently, and there is drift between the TS schema and SDKs.
+- Governance transition (Anthropic -> foundation) still settling; some vendors push their own extensions, risking fragmentation.
+
+ABSTRACTION HINTS
+- The clearest "winning standard" recipe in the batch: minimal, JSON-RPC-based core + three tiny primitives (tools/resources/prompts) + language-agnostic schema. Won because the surface is small enough to implement in an afternoon and because a dominant vendor (Anthropic) seeded both hosts and servers simultaneously.
+- The "USB-C" positioning matters: it solved an N-to-M integration problem (every host x every tool) with one connector, and each new host/server makes the whole network more valuable (network effect).
+- Its biggest risks are exactly what you'd expect from fast-adopted standards: security under-designed for a high-trust-execution world, and transport/auth churn that punishes early adopters. The design lesson: separate the stable core (messages/primitives) from the volatile edge (transport/auth), and govern the schema as a machine-readable artifact so bindings stay in sync.

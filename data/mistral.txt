@@ -1,0 +1,56 @@
+NAME
+Mistral (Mistral AI)
+
+CATEGORY
+Cloud API platform / model provider (open-weight + commercial models)
+
+OFFICIAL SITE
+https://mistral.ai
+
+DOCS URL
+https://docs.mistral.ai (API ref at /api; model catalog at /models)
+
+API PROTOCOL / FORMAT
+- OpenAI-compatible: /v1/chat/completions (and /v1/embeddings, /v1/audio/transcriptions, /v1/audio/speech, /v1/fim/completions, /v1/ocr). Mistral is the most "drop-in OpenAI" of the first-party providers.
+- SDKs: official Python/TypeScript/Java (mistralai). "Mistral SDK Clients" + API reference. Also a higher-level Agent API and Studio (Playground/eval/agents).
+- Source: https://docs.mistral.ai
+
+KEY MODELS
+- Mistral Medium 3.5 (mistral-medium-latest) — frontier multimodal, agentic/coding. $1.5 in / $7.5 out per MTok.
+- Mistral Small 4 (mistral-small-latest) — hybrid instruct+reasoning+coding, Apache 2.0. $0.15 / $0.6.
+- Mistral Large 3 (mistral-large-latest) — open-weight flagship multimodal, Apache 2.0. $0.5 / $1.5.
+- Ministral 3 (3B/8B/14B) — edge, Apache 2.0 ($0.10–0.20 both).
+- Codestral (code completion/FIM), OCR 4.1 ($4/1k pages), Voxtral (audio: TTS $0.016/1k chars; transcribe $0.003–0.006/min), Shieldstral/Moderation 2, Codestral Embed/Mistral Embed. Hosts third-party Z.ai GLM 5.2 ($1.4/$4.4, 1M ctx).
+- Source: https://mistral.ai/pricing/api and https://docs.mistral.ai/models/overview
+
+TOOL CALLING / FUNCTION CALLING
+- OpenAI-style function calling (tools + tool_calls), including parallel tool calls. The Agent API layers built-in tools: code execution ($30/1k calls), web search ($30/1k), image generation ($100/1k images), Libraries/RAG (OCR $3/1k pages, indexing, $0.01/call), premium news, persistent memory.
+- Structured outputs / JSON mode supported.
+- Source: https://mistral.ai/pricing/api (Agent API tools), https://docs.mistral.ai
+
+MULTIMODAL SUPPORT
+Text + vision (Pixtral lineage folded into Medium/Large/Small/GLM), audio input+output (Voxtral TTS + transcribe/realtime), OCR (document AI), image generation via Agent tool. Strong document/OCR positioning.
+
+PROTOCOLS / STANDARDS
+- MCP: custom MCP connectors (beta) for Vibe/Studio; connectors catalog. Skills. No A2A push of note.
+- Emphasis on sovereign/European infra + regional inference; open-weight distribution (Hugging Face).
+
+PRICING / COST MODEL
+- Per-token; cached input tokens = -90%; batch = 50% off; regional (EU) inference +10%; Priority Tier for predictable latency; Enterprise APIs = +75% (SLAs, rate limits). OCR per-1k-pages, audio per-minute/per-char.
+- Free plan + Pro/Team/Enterprise; self-host open-weight under Apache 2.0 (research) vs Mistral license (commercial derivatives).
+- Source: https://mistral.ai/pricing/api
+
+FEATURES
+Batch, prompt caching (-90%), FIM completions, structured outputs/JSON mode, fine-tuning (Forge: classifier APIs, LoRA), OCR, audio (TTS/STT), moderation (Shieldstral), embeddings, Agent API built-in tools, regional inference, Labs (preview models).
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- License ambiguity: "Apache 2.0" for research vs separate commercial "Mistral license" for derivatives/production — a real source of confusion and legal friction.
+- High model churn / rapid deprecations (long deprecated list; short ~6-month lifecycles).
+- Weaker flagship mindshare vs OpenAI/Anthropic/Google; smaller third-party tooling ecosystem.
+- Agent API built-in tools priced per-call and can surprise ($100/1k images).
+- Some models (Medium 3.5) are not open-weight despite "Open" label patterns; inconsistent openness signaling.
+
+ABSTRACTION HINTS
+- Mistral is a pure OpenAI-compatible bet: lowest-friction drop-in (base_url + API key swap). Abstraction layers can treat it as an OpenAI clone with no message translation.
+- Its model IDs (mistral-medium-latest etc.) and FIM/OCR/audio endpoints are the main extensions beyond OpenAI parity.
+- Open-weight + regional/sovereign angle makes it a common fallback in EU-regulated stacks.

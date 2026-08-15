@@ -1,0 +1,26 @@
+AIDER
+=========
+
+CATEGORY: coding agent
+LICENSE: Apache 2.0
+
+WHAT IT IS
+  AI pair-programming in the terminal: builds on an existing repo, edits via "edit formats," auto-commits to git, and runs lint/tests to fix errors.
+
+ARCHITECTURE / SEAMS
+  Python CLI; no autonomous multi-tool loop — a "pair programmer" model that sends repo map + selected files and receives edits via an "edit format" (whole/diff/udiff), applies them, auto-commits, optionally runs linters/tests. Context via the repo map: tree-sitter AST -> dependency graph (files as nodes, edges as deps) -> PageRank-style graph ranking to fit a token budget (--map-tokens). Terminal via /commands. Provider layer via LiteLLM. Clean seams: repo map (context), edit formats (output->apply), git integration, provider abstraction.
+
+STINKS
+  - No MCP, no full tool loop — narrow edit-format workflow only
+  - Terminal-only; requires Python
+  - Weaker on non-code/binary/large files; token cost
+  - Heavy SWE-bench/benchmark orientation skews design
+
+DONE GREAT
+  - Repo map is a clean, portable context abstraction: AST -> graph -> ranked selection within token budget
+  - Edit formats decouple model output from file application (whole/diff/udiff)
+  - Auto git commit + lint/test loop closes the verification gap
+  - Model-agnostic via LiteLLM, incl. local models
+
+ABSTRACTION ANGLE
+  Occupies the context-building + edit-application layer (deliberately not a tool loop). Project context = tree-sitter AST -> dependency graph -> ranked token-budget selection; this repo-map is exactly the "project context" seam a universal standard could specify. Tool execution is minimal (edit formats + git + lint/test), but edit formats are the canonical seam for "model output -> file mutation" decoupling. The provider abstraction (LiteLLM) is a model to absorb.

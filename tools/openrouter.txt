@@ -1,0 +1,24 @@
+OpenRouter
+=========
+
+CATEGORY: cloud API platform (multi-provider aggregator/router)
+LICENSE: n/a closed
+
+WHAT IT IS
+  Multi-provider aggregator/router that normalizes every provider down to one OpenAI Chat Completions API; not a model maker.
+
+ARCHITECTURE / SEAMS
+  OpenAI Chat Completions format only (POST /api/v1/chat/completions), namespaced model slugs + "latest" aliases. Hosted remote MCP server exposing cost/model data. Plugins: web, file-parser, response-healing, context-compression.
+
+STINKS
+  - Extra hop = added latency + ~5% fee; indirection with occasional provider-caused outages.
+  - Tool-calling fidelity varies per model (YAML-template fallback is lossy).
+  - Alias churn ("latest" moves underneath you); non-standard params silently ignored.
+
+DONE GREAT
+  - Normalizes all providers (incl. Anthropic) down to one OpenAI-shaped schema — clearest proof it's the universal interchange format.
+  - Automatic fallbacks (models[] + route:fallback), provider routing, unified usage/cost reporting.
+  - Works as a zero-code OpenAI SDK drop-in via base_url swap.
+
+ABSTRACTION ANGLE
+  The canonical model-agnostic layer. Any serious abstraction should support an OpenRouter-style base_url with zero code change. Its normalization of reasoning_tokens and cached tokens shows the exact fields a cross-provider abstraction must standardize.

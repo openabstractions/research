@@ -1,0 +1,55 @@
+NAME
+Google Gemini
+
+CATEGORY
+Cloud API platform / model provider (frontier closed models; multi-surface)
+
+OFFICIAL SITE
+https://gemini.google.com / https://ai.google.dev
+
+DOCS URL
+https://ai.google.dev/gemini-api/docs (Gemini API / Google AI Studio) and https://cloud.google.com/vertex-ai/generative-ai (Vertex AI; now "Gemini Enterprise Agent Platform")
+
+API PROTOCOL / FORMAT
+- Multiple surfaces: (1) Native Gemini REST format — generateContent with contents[].role in {user, model} and parts[] (text, inline_data, file_data, function_call/response); (2) OpenAI-compatible endpoint (ai.google.dev/gemini-api/docs/openai); (3) Anthropic-compatible endpoint on Vertex. Google Gen AI SDK (python-genai / google-genai) is primary.
+- Vertex AI adds OpenAI-libraries migration path ("Call Agent Platform models using OpenAI libraries") and a wide partner/Model-as-a-Service catalog (Claude, Grok, Mistral, DeepSeek, Qwen, GLM, Kimi, Llama).
+- Note: ai.google.dev fetches failed in this research run; details below combine the Vertex "Gemini Enterprise Agent Platform" docs with established Gemini API knowledge.
+
+KEY MODELS
+- Gemini Pro: 3.1 Pro (flagship); older 2.5 Pro. Flash: 3.7 Flash, 3.6 Flash, 3.5 Flash, 3 Flash, 2.5 Flash (+ "Omni Flash" preview). Flash-Lite: 3.5 / 3.1 / 2.5.
+- Multimodal generative: Gemini 3 Pro Image ("Nano Banana Pro"), Flash Image. Video: Veo 3 / 3.1 / 2. Audio: Lyria (music). Embeddings: Gemini Embedding 2. (Branding "Nano Banana" appears in Together/third-party listings.)
+- Very long context (1M–2M tokens typical for Pro/Flash). Source: https://docs.cloud.google.com/gemini-enterprise-agent-platform/models
+
+TOOL CALLING / FUNCTION CALLING
+- Native "function calling" (function declarations in tools config; function_call/function_response parts). Automatic function calling on Gemini 3.
+- Structured output (response schema / response_mime_type application/json), JSON mode, enum constraints.
+- Grounding with Google Search / Maps / enterprise (retrieval-style tool). Code execution tool. Computer use (preview). Live API async function calling.
+- Edge cases: function calling is schema/declaration based (differs from OpenAI tools array); "model" role replaces "assistant"; thought/thinking blocks surfaced via thought signatures.
+
+MULTIMODAL SUPPORT
+The broadest natively: text, image (in/out), audio (in/out via Live API + TTS/STT), video (in via understanding, out via Veo), documents/PDF, code. Native image understanding, video understanding, audio understanding, bounding-box detection.
+
+PROTOCOLS / STANDARDS
+- MCP: Knowledge MCP server, MCP tool support, connectors (adopted, like OpenAI).
+- A2A: Google is the originator of Agent2Agent (A2A) protocol + ADK (Agent Development Kit); strong A2A proponent.
+- Live API (WebSocket, audio/video streams). OpenAI/Anthropic compat shims mean Gemini can be consumed in both dominant formats.
+
+PRICING / COST MODEL
+- Tiered per-token (input/output, sometimes "context" and "completion" split), with context caching (automatic + explicit), batch inference (50% off), Provisioned Throughput (reserved capacity), and PayGo tiers (Standard / Priority / Flex).
+- Regional/multi-region endpoint premiums (10%+) on Vertex. Free tier via AI Studio.
+- Source: https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing
+
+FEATURES
+Context caching, thinking (thought signatures), grounding (Google Search/Maps/enterprise), Live API, batch, embeddings (text+multimodal), fine-tuning (SFT, RLHF/reinforcement, preference tuning, continuous tuning), provisioned throughput, content filters/Responsible AI, Content Credentials.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- Fragmented surfaces: Gemini API (ai.google.dev) vs Vertex AI vs "Agent Platform" — different endpoints, model IDs, quotas, and auth. Confusing for developers.
+- Two native formats (generateContent) PLUS OpenAI/Anthropic compat shims = three ways to call the same model; subtle behavior differences.
+- Safety filters can block valid responses; 429/quota throttling common complaints.
+- Rapid model-name churn and "Flash vs Pro vs Omni vs Nano Banana" branding sprawl.
+- Native format (contents/parts, role "model") is the least OpenAI-compatible of the big three, forcing real translation work.
+
+ABSTRACTION HINTS
+- Gemini converges ONTO OpenAI/Anthropic (shipping compat endpoints) while keeping its own richer native format — evidence that OpenAI format is winning, but Gemini's native multimodal+grounding is the superset abstraction layers must eventually expose.
+- A2A is Google's counter-standard to Anthropic's MCP at the agent-orchestration layer.
+- "Thinking" is modeled as explicit thought blocks + thought signatures (yet another reasoning representation to normalize).

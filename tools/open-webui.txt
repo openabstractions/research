@@ -1,0 +1,25 @@
+OPEN WEBUI
+==========
+
+CATEGORY: chat UI
+LICENSE: "Open WebUI License" (custom: BSD-3 style + branding clause; originally MIT, relicensed ~Aug 2025; requires CLA)
+
+WHAT IT IS
+  Self-hosted, offline-capable AI chat platform fronting Ollama + any OpenAI-compatible API, with RAG, web search, image gen, plugins/agents, RBAC and admin.
+
+ARCHITECTURE / SEAMS
+  Python FastAPI backend + SvelteKit frontend served by one process (monolith). Seams that are clean: OpenAI-compatible provider abstraction + Pipelines plugin runtime; pluggable RAG pipeline (loader→embedder→vector DB→retriever) across 9 vector DBs; plugin taxonomy (Filter/Action/Pipe/Tool/Skill). Monolith seams: single FastAPI app bundles auth, DB, RAG, chat, admin; frontend coupled to backend via its own API.
+
+STINKS
+  - Custom license with branding clause + CLA (fork/monetization friction).
+  - Backend is a growing monolith; frequent breaking changes; huge brittle env-var config surface.
+  - Plugin/pipelines ecosystem churn — extension API changes between versions.
+  - DeepSeek reasoning_content rendering + tool-call bugs recur.
+
+DONE GREAT
+  - Provider adapter boundary (Ollama + OpenAI-compatible + Pipelines) is the cleanest seam in the batch.
+  - Pluggable RAG stack across many vector DBs with hybrid BM25+vector and reranking.
+  - Rich plugin taxonomy as a real extensibility seam.
+
+ABSTRACTION ANGLE
+  Occupies the client + capability/tooling + context layers all in one box. It implies a "provider gateway" abstraction (it already exports an OpenAI-compatible API and consumes one) but has no separate hosting/resource-arbiter or compute-backend layer. What we'd extract: the provider gateway + plugin runtime as the universal standard; pull RAG and auth out of the chat core.

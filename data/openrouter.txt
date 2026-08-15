@@ -1,0 +1,52 @@
+NAME
+OpenRouter
+
+CATEGORY
+Cloud API platform (multi-provider aggregator / router — not a model provider)
+
+OFFICIAL SITE
+https://openrouter.ai
+
+DOCS URL
+https://openrouter.ai/docs (llms.txt index; OpenAPI spec at /openapi.json|yaml)
+
+API PROTOCOL / FORMAT
+- OpenAI Chat Completions format ONLY: POST https://openrouter.ai/api/v1/chat/completions. "Normalizes the schema across models and providers so you only need to learn one." No Anthropic-format endpoint.
+- SDKs: @openrouter/sdk (TypeScript), openrouter (Python), plus @openrouter/agent (agent SDK with callModel). OpenAI SDK works as drop-in (baseURL swap).
+- Model slugs are namespaced: openai/..., anthropic/..., deepseek/..., etc. + "latest" aliases (~openai/gpt-latest) that auto-resolve.
+- Source: https://openrouter.ai/docs/quickstart and /docs/api-reference/overview
+
+KEY MODELS
+Aggregator — hundreds of models across every provider (OpenAI, Anthropic, Google, DeepSeek, Mistral, Groq, Together-hosted models, etc.). Not a model maker itself. Catalog at openrouter.ai/models, list via GET /api/v1/models.
+
+TOOL CALLING / FUNCTION CALLING
+- OpenAI-style tools/tool_choice. For OpenAI-compatible providers, passed through as-is; for providers with custom interfaces (e.g. Anthropic), OpenRouter transforms/maps; for others, tools are templated into a YAML prompt and the model replies with an assistant message.
+- Structured outputs: response_format json_object or json_schema (strict). Parallel tool calls where upstream supports.
+- Edge cases: tool behavior is not uniform across providers (some models only support prompt/YAML tool calling); non-standard params silently ignored; assistant prefill supported.
+
+MULTIMODAL SUPPORT
+Delegated to the underlying model (image_url content parts for vision models; image/video/audio endpoints for generation models). No first-party modality, just routing.
+
+PROTOCOLS / STANDARDS
+- MCP: hosted remote MCP server at https://mcp.openrouter.ai/mcp (OAuth) that exposes live model/cost/usage data to coding assistants (Claude Code, Cursor, Codex).
+- Plugins: web (search), file-parser (PDF), response-healing (JSON repair), context-compression (middle-out). BYOK (bring-your-own-key) supported.
+- Source: https://openrouter.ai/docs/quickstart, /docs/api-reference/overview, /docs/guides/features/plugins
+
+PRICING / COST MODEL
+- Prepaid credits; pricing = upstream provider price + OpenRouter margin (~5% fee, historically). Per-token cost reported in response usage.cost. BYOK avoids margin for API-key passthrough.
+- Optional headers (HTTP-Referer, X-Title) for leaderboard attribution.
+- Source: https://openrouter.ai/docs/api-reference/overview (usage.cost fields)
+
+FEATURES
+Automatic fallbacks (models[] array + route:fallback), provider routing (provider preferences), "latest" aliases, streaming (SSE), structured outputs, assistant prefill, message transforms/context compression, plugins (web search, PDF, JSON healing), BYOK, unified usage/cost reporting, request builder.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- Extra hop = added latency + 5% fee; an indirection layer with occasional provider-caused outages.
+- Tool-calling fidelity varies per model (YAML-template fallback is lossy vs native tool use).
+- Model alias churn ("latest" points can move underneath you); some non-standard params silently ignored rather than erroring.
+- Aggregated rate limits / fair-use issues; reasoning-token pricing passthrough can be opaque.
+
+ABSTRACTION HINTS
+- OpenRouter is the clearest proof that the OpenAI Chat Completions schema became the universal interchange format — it normalizes ALL providers (including Anthropic) down to one OpenAI-shaped API.
+- It abstracts away "which provider" via routing/fallbacks/aliases — the canonical model-agnostic layer. Any serious abstraction should support an OpenRouter-style base_url with zero code change.
+- Its normalization of reasoning tokens (completion_tokens_details.reasoning_tokens) and cached tokens shows the fields a cross-provider abstraction must standardize.

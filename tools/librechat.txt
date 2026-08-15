@@ -1,0 +1,25 @@
+LIBRECHAT
+=========
+
+CATEGORY: chat UI
+LICENSE: MIT (main repo); RAG API separate repo (also MIT)
+
+WHAT IT IS
+  Self-hosted "enhanced ChatGPT clone" unifying OpenAI/Anthropic/Google/AWS/local providers with agents, MCP, code interpreter, artifacts and enterprise multi-user auth.
+
+ARCHITECTURE / SEAMS
+  Node.js Express backend (/api) + React Vite frontend (/client) + shared packages/; MongoDB (conversations/users) + Redis (sessions/streams). Clean seams: /api vs /client vs packages/; per-provider endpoint/adapter registry; Agents/Skills/MCP layered on a tool framework; RAG deliberately extracted to separate rag_api; librechat.yaml as config-driven provider surface. Monolith seams: API server bundles auth, chat, agents, moderation, billing, files; provider adapter logic interwoven with streaming/caching.
+
+STINKS
+  - DeepSeek reasoning_content/replay bugs (many issues); tool-call reliability bugs (MCP "No content part", tool_calls never executed).
+  - MongoDB + Redis heavier than SQLite peers; large config surface (librechat.yaml + env vars).
+  - Agents powerful but complex; breaking changes per release.
+  - Some features depend on separate rag_api repo (fragmentation).
+
+DONE GREAT
+  - Clean backend/frontend/shared split plus provider adapter registry.
+  - RAG extracted to its own service — a model for splitting.
+  - Robust tool layer: function calling, OpenAPI Actions, MCP servers, Skills, sandboxed Code Interpreter.
+
+ABSTRACTION ANGLE
+  Occupies client + capability/tooling + context (RAG) layers. It already splits RAG out and has a config-driven provider surface, but the provider adapter is interwoven with streaming/caching. What we'd extract: the provider/adapter registry + the tool runtime (Agents/Skills/MCP) as the universal seams; the reasoning_content replay problem is a concrete gap a standard should own.
