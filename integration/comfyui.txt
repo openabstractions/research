@@ -1,0 +1,326 @@
+ComfyUI — DOWNLOAD AND MODEL-STORE INTEGRATION
+==============================================
+
+LICENSE: GPL-3.0  *** SEE THE LICENCE SECTION FIRST — IT CHANGES THE PLAN ***
+LANGUAGE: Python
+UPSTREAM PINNED AT: Comfy-Org/ComfyUI @ cc0fc21fea7a6a82f568362b15b7fbd713b419c1
+  (master, 2026-08-17), version 0.33.0. Line numbers are against that commit.
+  NOTE: the canonical repo is now `Comfy-Org/ComfyUI`. `comfyanonymous/ComfyUI`
+  is a redirect and the GitHub issue-search API refuses it (422). Use the new
+  path in permalinks: https://github.com/Comfy-Org/ComfyUI/blob/cc0fc21/<path>#L<n>
+SURVEYED: 2026-08-19
+SEE ALSO: research/tools/comfyui.txt (what it is), research/transfer/SUMMARY.txt.
+
+
+*** THE LICENCE QUESTION — ANSWERED ***
+
+  CONFIRMED GPL-3.0. Verified three ways, not assumed:
+    - LICENSE at repo root is the verbatim GNU GPL v3 text.
+    - GitHub API reports spdx_id "GPL-3.0" for Comfy-Org/ComfyUI.
+    - pyproject.toml L5: `license = { file = "LICENSE" }`.
+  ComfyUI-Manager (Comfy-Org/ComfyUI-Manager) is ALSO GPL-3.0, and it is now
+  pulled into core as a pip dependency: manager_requirements.txt pins
+  `comfyui_manager==4.2.2`. So the copyleft surface has GROWN, not shrunk —
+  the component that actually downloads models is itself GPL-3.0 and is now
+  part of the shipped stack.
+
+  WHAT FORKING IT ACTUALLY IMPLIES
+
+  1. Forking is legal and unrestricted. GPL-3.0 explicitly permits forking,
+     modifying, and commercial use. Nobody needs permission. There is no CLA
+     and no contributor licence terms in CONTRIBUTING.md.
+
+  2. The obligation is triggered by DISTRIBUTION, not by use. If the fork runs
+     only on our own machines or is offered as a network service, GPL-3.0 imposes
+     no source-release duty (it is GPL, not AGPL — there is no §13 network
+     clause). Internal use and SaaS are unencumbered.
+
+  3. The moment we SHIP the forked ComfyUI to anyone — installer, container
+     image, bundled desktop app, appliance — we must offer the complete
+     corresponding source of the whole work under GPL-3.0. That includes our
+     downloader abstraction if it is linked into the same program.
+
+  4. AND THAT IS THE ACTUAL PROBLEM FOR THIS PROJECT. The entire point of the
+     plan is a SHARED abstraction adopted by three forks. If the shared download
+     facade is imported into a GPL-3.0 ComfyUI fork and that fork is distributed,
+     the facade is being distributed as part of a GPL-3.0 combined work. Under
+     the FSF's reading, a Python library imported into a GPL program forms a
+     single work. If we hold the copyright on the facade we can dual-licence it
+     and keep the Ollama/Lemonade forks permissive — copyright holders are not
+     bound by their own licence. But we must OWN it outright: no copyleft code
+     inside the facade, and no contributions accepted without a CLA. If any
+     third-party GPL code lands in the facade, the copyleft propagates back into
+     the Apache-2.0 Lemonade fork and the MIT Ollama fork, which is precisely
+     the entanglement the project's licence policy forbids.
+
+  5. Custom nodes are the known grey zone and UPSTREAM HAS NEVER RULED ON IT.
+     Issue #3362, "Which license for custom nodes?" (opened 2024-04-27), cites
+     the GPL FAQ's own "borderline case" language about dynamic plugin
+     architectures. As of this survey it has no maintainer answer. There is a
+     second thread, Discussion #14346 ("nodes and models licences and
+     compliance"). Two years of silence on the central licensing question is
+     itself a finding: there is no authority to appeal to, and no exemption to
+     rely on.
+
+  6. RECOMMENDED POSTURE — DO NOT FORK ComfyUI FOR THE DOWNLOADER WORK.
+     Three independent reasons converge on the same answer:
+       (a) copyleft entanglement risk against an explicit project policy;
+       (b) ComfyUI core has NO model downloader to replace (see below), so a
+           fork buys nothing — there is no incumbent code to displace;
+       (c) it can already be pointed at a shared store with config alone.
+     The clean architecture is: keep the facade a SEPARATE, permissively
+     licensed process/package that we own, and integrate with ComfyUI across a
+     process boundary (its HTTP API, or a small GPL-3.0 custom node we publish
+     as GPL-3.0 that talks to our service). Independent programs communicating
+     over a socket are not a combined work; that boundary is the standard,
+     defensible one. This gets the integration without inheriting the licence.
+     If anyone later insists on an in-process fork, that is a legal-review gate,
+     not an engineering decision.
+
+
+WHERE THE DOWNLOAD CODE IS
+  HEADLINE: ComfyUI CORE HAS NO MODEL DOWNLOADER. This is the single biggest
+  surprise of this survey and it inverts the brief's assumption.
+
+  Verified by exhaustion, not by assumption:
+    - `huggingface_hub` does not appear in requirements.txt at all.
+    - grep for hf_hub_download / snapshot_download / HfApi across the tree
+      outside comfy_api_nodes: zero hits. The only `from_pretrained` calls
+      (comfy/sd1_clip.py L490, comfy/text_encoders/*) take LOCAL paths.
+    - `find -iname "*download*"` yields exactly two files, neither a model
+      downloader: comfy_api_nodes/util/download_helpers.py (fetches RESULTS of
+      hosted API calls — images/videos) and tests-unit/assets_test/test_downloads.py
+      (tests serving assets TO the browser).
+    - app/model_manager.py (221 lines) is READ-ONLY: it lists model files
+      (/experiment/models, /experiment/models/{folder}) and renders preview
+      images. There is no write path and no fetch path in it.
+    - requests appears only in app/frontend_management.py (L135, L148, L189),
+      which downloads the FRONTEND package from GitHub releases, not models.
+
+  So "the download code" for user models lives in two places, both outside core:
+
+  1. THE USER'S BROWSER. The "Download" button in the missing-models panel
+     triggers a browser download to the client's Downloads folder. Confirmed by
+     issue #13676 (open, 2026-05-02): "'Download' button in missing models panel
+     uses browser download instead of server-side download to configured paths".
+     The reporter's documented workaround is `wget -P <model_folder> <url>`.
+
+  2. ComfyUI-Manager, glob/manager_downloader.py (163 lines) — the real one.
+       basic_download_url(url, dest_folder, filename)   L25
+       download_url(model_url, model_dir, filename)     L49   <- the dispatcher
+       aria2_find_task / aria2_download_url             L63 / L76
+       download_url_with_agent(url, save_path)          L105
+       download_repo_in_bytes(repo_id, local_dir)       L127
+     Call sites (glob/manager_server.py):
+       do_install_model(item)                           L660
+         - `<huggingface>` sentinel -> download_repo_in_bytes  L678
+         - github/huggingface/heidelberg URLs -> download_url  L685
+         - otherwise -> download_url_with_agent                L694
+       get_model_dir(data) / get_model_path(data)       L391 / L442
+       custom-node archive downloads                    L1280, L1285
+     Also glob/manager_core.py L1042 and L1317 for node packages.
+
+  There are competing OPEN attempts to add a server-side downloader to core —
+  the area is unsettled and forking into it means forking into a moving target:
+    #14586  open 2026-06-22  PR: server-side model downloads + HuggingFace OAuth
+                             (POST /api/download-models, availability status,
+                             cancel-session; behind a feature flag)
+    #13961  open 2026-05-18  PR: /internal/models/download, `.part` atomic
+                             writes, first-writable-folder selection
+    #12487  open 2026-02-16  feat: route to auto-download missing models
+    #12961  open 2026-03-15  Missing-Models-Downloads (15 comments)
+    #13464  open 2026-04-18  bug: missing model download buttons do nothing
+    #8436   open 2025-06-05  "let server download models?"
+
+
+WHAT IT USES TO TRANSFER
+  Core: nothing (see above). aiohttp is the SERVER; requests is used only for
+  the frontend package.
+
+  ComfyUI-Manager, in dispatch order (manager_downloader.py L49):
+    1. If `COMFYUI_MANAGER_ARIA2_SERVER` is set -> aria2 over JSON-RPC via
+       aria2p (L15-L23, L76). Resumable. This is an EXISTING, ENV-SELECTED
+       BACKEND SWAP — the one real seam in the whole ComfyUI stack.
+    2. Otherwise -> `torchvision.datasets.utils.download_url` (L56-L57).
+       Yes: model weights are fetched by a TORCHVISION dataset helper. It writes
+       straight to the final filename, no .part, no Range, no resume.
+    3. `basic_download_url` (L25) — requests with stream=True, 1 KiB chunks,
+       writes directly to `dest_path`. No temp file, no atomic rename, no hash
+       check, no Range.
+    4. `download_url_with_agent` (L105) — urllib with a spoofed Chrome
+       User-Agent, `response.read()` into memory ENTIRELY, then one write. On a
+       multi-GB model this is a whole-file RAM buffer.
+    5. `download_repo_in_bytes` (L127) — uses `huggingface_hub.HfApi` only to
+       ENUMERATE the repo (repo_info with files_metadata, for a tqdm total),
+       then fetches each file itself with requests streaming to `out_path`.
+       Note the comment at L126: "snapshot_download doesn't provide file size
+       tqdm" — they deliberately reimplemented it to get a progress bar.
+
+  HUGGINGFACE_HUB v1.0 REGRESSION EXPOSURE: PARTIAL AND INDIRECT. Manager
+  imports huggingface_hub but only for metadata (HfApi.repo_info); it does not
+  call hf_hub_download or snapshot_download for the bytes, so the removal of
+  `resume_download` and the dropping of hf_transfer do not regress it — it had
+  no resume to lose on that path. Core ComfyUI does not depend on
+  huggingface_hub at all. Of the three targets, ComfyUI is the LEAST exposed to
+  the Hub v1.0 change and Lemonade the most conceptually adjacent (it
+  reimplements the same cache).
+
+
+WHAT HAPPENS ON SLEEP / PROCESS DEATH
+  WORST OF THE THREE. On the default (non-aria2) path there is no resume, no
+  temp file, and no integrity check, so an interrupted download leaves a
+  TRUNCATED FILE AT THE FINAL FILENAME. ComfyUI's model discovery is
+  filename-based, so that truncated file then presents as an installed model.
+  It fails later, at load time, with a deserialization error that names neither
+  the download nor the truncation.
+
+  ISSUE EVIDENCE (Comfy-Org/ComfyUI-Manager unless noted)
+    #2934  OPEN  2026-05-31  "Doesn't seem to be a facility to resume incomplete
+                             model downloads". Verbatim user account: ~32 GB
+                             models, "tried probably about 8 times", hangs at
+                             93-98%, "It is not possible to add another download,
+                             or to resume the original download... necessary to
+                             close and restart comfyUI -- by which point the
+                             partial download has been lost." Zero comments,
+                             unanswered. This is the definitive report.
+    #101   closed 2023-09-08 "Windows - download models gives me partial
+                             downloads": "the model is not fully downloading
+                             each model file, it gets to 80/90/99% then is
+                             marked as succeeded", wrong filesize on disk.
+                             Exactly the no-atomic-rename failure. Open 2023,
+                             the same failure mode is still live in 2026.
+    #2061  closed 2025-08-05 PR: "Fixed aria2 download issues and Added aria2
+                             resumable download" — adds a `.downloading` suffix
+                             so aria2 can resume, and stops showing a completed
+                             check-mark when a download died. CONFIRMS that
+                             resume exists only on the aria2 path, and that the
+                             UI previously lied about completion.
+    #1484  open  2025-01-26  "I am stucked!" (16 comments), corrupt downloads.
+    Comfy-Org/ComfyUI #13676 open 2026-05-02 — browser-download misrouting.
+  Sleep specifically: no issue found that isolates suspend/resume. Not needed —
+  on a transport with no resume at all, sleep is just one more way to lose the
+  file. NOT SEPARATELY VERIFIED.
+
+
+WHERE MODELS GO, AND HOW THEY ARE NAMED
+  Filename-and-folder. No content addressing, no manifest, no digest anywhere in
+  the historical design.
+    folder_paths.py
+      supported_pt_extensions L10 — .ckpt .pt .pt2 .bin .pth .safetensors .pkl .sft
+      folder_names_and_paths  L12 — dict[str, tuple[list[str], set[str]]]
+      27 registered keys at L25-L67, of which 24 are model-weight folders
+      (the non-model three are `configs`, `custom_nodes`, `datasets`).
+      NOTE: the brief says 12 type folders — that number is STALE. It is 24 now,
+      and still growing (background_removal, frame_interpolation,
+      geometry_estimation, optical_flow, detection are all recent additions).
+      Several keys map to MULTIPLE directories, e.g. text_encoders ->
+      {text_encoders, clip} L30; diffusion_models -> {unet, diffusion_models}
+      L31; controlnet -> {controlnet, t2i_adapter} L38.
+      add_model_folder_path(name, path, is_default) L373
+      get_folder_paths(name) L391, get_full_path / _or_raise L441 / L461
+    Identity of a model = (folder key, relative filename). Two different files
+    with the same name in two roots collide; the same file in two roots is two
+    models. This is the layout that a shared store has to reconcile against
+    Ollama's sha256 blobs and Lemonade's HF cache — and it is the only one of the
+    three with NO digest to join on.
+
+  IMPORTANT COUNTER-TREND — ComfyUI IS BUILDING A CONTENT-ADDRESSED ASSET INDEX.
+  This is new (2026) and directly relevant to the shared-store work:
+    app/assets/database/models.py
+      class Asset            L26
+      hash column            L32   (String(256), nullable)
+      Index("uq_assets_hash", "hash", unique=True)  L51
+      class AssetReference   L60   — MANY paths -> ONE asset
+    app/assets/scanner.py
+      compute_blake3_hash / HashCheckpoint imported L35
+      build_asset_specs(..., compute_hashes=False) L310-L322, hash prefixed
+      "blake3:" L355-L356
+    app/assets/services/path_utils.py — maps paths to/from folder_paths keys and
+      derives tags like `model_type:checkpoints`.
+    Alembic migrations under alembic_db/. `blake3` is a hard dependency in
+    requirements.txt.
+  So ComfyUI is independently converging on hash-keyed assets with multiple path
+  references — the same shape our shared store needs. Hashing is opt-in
+  (compute_hashes defaults False, and the code comments it as "slow for large
+  files"), so it is not yet a store, but it is the seam to align with rather
+  than fight. UNCERTAIN how stable this API is; it is unversioned and moving.
+
+
+EXTERNAL MODEL DIRECTORY TODAY
+  YES — and this is ComfyUI's strongest card. It has the richest config-only
+  story of the three, and it needs NO fork.
+    extra_model_paths.yaml (template at extra_model_paths.yaml.example, 71 lines)
+      loaded by main.py L130-L136 via utils/extra_config.py
+      load_extra_path_config(yaml_path) L6, calling
+      folder_paths.add_model_folder_path(x, normalized_path, is_default) L34
+      Supports MULTIPLE roots per type and an `is_default` flag that controls
+      which root is preferred.
+    CLI flags (comfy/cli_args.py)
+      --base-directory            L70  — moves models, custom_nodes, input,
+                                         output, temp, user in one go
+      --extra-model-paths-config  L71  — one or more extra yaml files
+      --models-directory          L257 — overrides just the models folder
+                                         (newer, more surgical than --base-directory)
+      --output/--temp/--input/--user-directory  L72-L74, L256
+    Search order matters: get_folder_paths returns the list, and writers
+    (including ComfyUI-Manager) take element [0]. Putting the shared store first
+    makes it both the read source and the write target.
+    ComfyUI-Manager honours this too, and adds its own hook: manager_server.py
+    L391-L394 checks for a `download_model_base` key in folder_names_and_paths
+    and, if present, downloads EVERYTHING beneath it. Registering
+    `download_model_base` in extra_model_paths.yaml redirects all Manager model
+    downloads to a shared directory with zero code change.
+
+  KNOWN FRICTION, from real reports:
+    #11404 open 2025-12-18  extra_model_paths config not working (11 comments)
+    #10130 open 2025-09-30  extra_model_paths.yaml DELETED ON UPDATE in the
+                            Windows Desktop package. Labelled "Potential Bug".
+                            A config-only shared store is only as durable as the
+                            config file, and on Desktop it is not durable.
+    #15043 open 2026-07-23  request to expand extra_model_paths to more folders
+    #4885  open 2024-09-11  base_path silently includes subdirectories
+    #6039  open 2024-12-13  folder_paths.py doesn't include extra_model_paths
+                            (import-ordering hazard for custom nodes)
+
+
+HOW PLUGGABLE IS IT?
+  Core: THE QUESTION DOES NOT APPLY. There is no downloader in core to inject
+  into. Adding one is not "replacing a downloader", it is writing the feature
+  upstream is currently arguing about in #14586 / #13961 / #12487. A fork here
+  competes with two open PRs.
+
+  ComfyUI-Manager: EASY, and a seam already exists.
+    - `download_url` (manager_downloader.py L49) is a single dispatcher already
+      branching on an environment variable (`COMFYUI_MANAGER_ARIA2_SERVER`) to
+      select an alternative backend. Adding a third branch that calls our facade
+      is a ~10 line change in one function.
+    - Only three functions are ever called for model bytes, from ONE place
+      (do_install_model, manager_server.py L660): download_repo_in_bytes,
+      download_url, download_url_with_agent.
+    - Destination selection is already factored out (get_model_dir L391 /
+      get_model_path L442), so we do not have to touch path logic at all.
+    - MONKEY-PATCHABLE WITHOUT A FORK: a custom node loaded at startup can
+      rebind `manager_downloader.download_url`. That is not distribution of a
+      modified GPL work at all — it sidesteps the licence question entirely.
+      UNVERIFIED that import ordering permits this reliably; worth a spike, and
+      if it holds it is the cheapest integration available anywhere in this
+      survey.
+
+  Estimated change size if forking Manager anyway: a handful of call sites, one
+  file. But see the licence section — do not take this route by default.
+
+
+FORK FRICTION
+  Activity: 532 commits to master between 2026-05-20 and 2026-08-19 (~5.9/day) —
+  the HIGHEST churn of the three targets. 128,257 stars, 15,102 forks, 4,623
+  open issues. ComfyUI-Manager pushed within 24h of this survey.
+  The house file already flags weekly breaking changes; this measurement
+  confirms it quantitatively.
+  Rebase risk: HIGH. And the specific areas we would touch are the hottest ones
+  — the assets subsystem is brand new and unversioned, server-side download is
+  actively contested across three open PRs, and folder_paths keeps gaining
+  types. A downloader fork here would be rebasing into an area upstream is
+  rewriting underneath us.
+  Plus the GPL-3.0 obligation on any distributed fork.
+  VERDICT: integrate across a process boundary or by runtime rebinding. Do not
+  fork.

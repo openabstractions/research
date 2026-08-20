@@ -1,0 +1,185 @@
+RSYNC AND SMB (the NAS case)
+============================
+
+CATEGORY: local-network file transfer — one delta-sync tool, one remote filesystem
+LICENSE:
+  rsync 3.x — *** GPL-3.0. HARD NO for linking. *** Subprocess only, and shipping
+    the binary carries GPLv3 obligations (source offer, patent grant,
+    installation-information terms). Apple's own conduct is the cleanest evidence
+    of how seriously this bites: macOS shipped the 2006-vintage rsync 2.6.9 for
+    ~18 years because it could comply with GPLv2 but not GPLv3, and in macOS 15
+    Sequoia replaced it with openrsync. (derflounder.wordpress.com 2025-04-06;
+    heise.de; appleinsider — read 2026-08-18)
+  openrsync — ISC licence. Permissive, green. OpenBSD-originated, now shipping in
+    macOS 15+. Not feature-for-feature complete with rsync 3.x.
+  SMB — a protocol, not a codebase. No licence question. Windows implements both
+    ends in-box. Pure-Go client github.com/hirochachacha/go-smb2 is BSD-2-Clause
+    (verified from its LICENSE, 2026-08-18); the CloudSoda/go-smb2 fork is the
+    more actively maintained continuation (its licence UNVERIFIED, presumed
+    inherited BSD-2).
+ADDED: 2026-08-18 — transfer-implementation survey for the download abstraction.
+
+WHAT THEY ARE
+  Two very different things that both get called "the NAS option".
+  rsync is a delta-transfer program: it compares source and destination and moves
+  only the differing blocks, verified by checksum.
+  SMB is a remote filesystem. Once a share is mounted or a UNC path is opened,
+  "downloading" is just reading a file. There is no transfer protocol to speak
+  of, because the redirector is doing it.
+
+SURVIVAL
+  rsync
+    Process exits:   NO. Nothing resumes it. What survives is the partial file,
+      and only if you passed --partial or --partial-dir; without them rsync
+      deletes the incomplete destination file on failure. That default has cost
+      people entire 40 GB transfers.
+    Reboot / sleep:  NO. No daemon-side job state. rsyncd (--daemon, port 873) is
+      a server, not a job manager.
+    Network loss:    NO. The run dies. You re-invoke, and with --partial plus
+      --append-verify the next run appends rather than restarts.
+  SMB
+    Process exits:   NO — but the question barely applies. There is no transfer
+      object; there is a file handle. Your own process owns the offset.
+    Reboot / sleep:  the SMB session is re-established by the redirector; an open
+      handle may or may not survive (SMB3 persistent handles / continuous
+      availability exist for clustered shares). UNVERIFIED for the ordinary
+      consumer-NAS case; assume the handle dies.
+    Network loss:    the read fails. You reopen and seek.
+    Restartable copy: Windows provides it at the file-copy layer, not the
+      protocol layer — CopyFileEx with COPY_FILE_RESTARTABLE, which is what
+      `robocopy /Z` ("restartable mode") uses. Robocopy records how much of each
+      file was transferred and resumes from there on the next run. (Microsoft
+      robocopy docs plus vendor guides, read 2026-08-18. The exact CopyFileEx
+      wording was not re-read for this profile — treat the API name as reliable
+      and the mechanism description as reported.)
+
+UNIT OF WORK
+  rsync: a PROCESS INVOCATION. No job, no id, no handle, no queue, nothing to
+    query, nothing to adopt. This is rsync's fundamental disqualification as a
+    delegation target.
+  SMB: a FILE HANDLE. Also no job — but a file handle plus a byte offset is a
+    complete and trivially portable resume token, because you control both ends
+    of the read. For the NAS tier, YOU are the transfer engine; SMB just gives
+    you random access. That is a strength, not a gap.
+
+RESUME
+  rsync: three distinct behaviours, and choosing wrong is a real bug class.
+    --partial            keep the incomplete file so a later run can use it.
+    --append             append missing bytes, trusting the existing prefix.
+    --append-verify      append missing bytes, but checksum the existing prefix
+                         against the source first. Use this one.
+    --checksum (-c)      compare by content hash instead of size+mtime.
+    default delta-xfer   rolling checksum + strong hash over both sides. For a
+                         40 GB file over a NAS link this means reading 40 GB on
+                         BOTH ends before moving anything — frequently slower
+                         than just copying. --whole-file (-W, the default when
+                         both ends are local) turns it off.
+  SMB: seek + read. Perfectly resumable, needs zero server cooperation, and no
+    Range header negotiation to get wrong. The simplest resume story here.
+
+INTEGRITY
+  rsync: YES, and it is automatic. Every transferred file gets a whole-file
+    checksum check at the end and is retried if it fails. Protocol 30+ (rsync
+    3.0.0+) used MD5; rsync 3.2.0+ negotiates faster non-cryptographic hashes —
+    xxh64 / xxh128 / xxh3 — when both ends support them, overridable with
+    --checksum-choice / --cc. Fine against corruption; xxhash is explicitly not a
+    security hash.
+  SMB: NONE. It is a filesystem. Nothing verifies content. You hash it yourself.
+  This is the trade: rsync gives you verification and no job identity; SMB gives
+  you neither and gets out of your way.
+
+PROGRESS REPORTING
+  rsync: text on stdout. --info=progress2 gives an aggregate percentage,
+    --outbuf=L makes it line-buffered so a parent can read it. There is no
+    structured API, no callback, no RPC. You screen-scrape a human-readable
+    progress line whose format is not a contract. This is the single worst
+    progress interface in the survey.
+  SMB: whatever you count yourself, which is exactly right — you are doing the
+    reads.
+
+DELEGATION / HANDOFF
+  rsync: NONE. Nothing to hand over.
+  SMB: none as a protocol, but a UNC path plus a byte offset plus an expected
+    digest is a complete, portable job description that any process on the LAN
+    can act on. The handoff primitive has to be invented by the facade; SMB will
+    not obstruct it.
+  Worth noting for the Windows tier: BITS accepts SMB remote names ("The remote
+  file name must use the HTTP, HTTPS, or SMB protocol" — bits/
+  life-cycle-of-a-bits-job, read 2026-08-18). So on Windows, the NAS case and the
+  internet case can be the same BITS job, with the same GUID, the same
+  persistence and the same ownership transfer. That is a significant finding.
+
+PLATFORM AND BINDINGS
+  rsync: native on Linux and BSD. macOS 15+ ships openrsync instead. Windows has
+    NO native rsync — you ship cwrsync (GPL, plus a Cygwin runtime), or MSYS2, or
+    require WSL. For a Windows-first product this is close to fatal.
+  openrsync: OpenBSD, macOS 15+. Windows port UNVERIFIED — we found none.
+  SMB: native everywhere. Windows in-box on both ends; Samba on Linux; macOS
+    client built in. Pure-Go clients exist (go-smb2, BSD-2-Clause).
+
+DRIVING IT FROM GO
+  rsync: subprocess only. No CGO route worth taking, and linking is barred by
+    GPLv3 anyway. Parse --info=progress2 off a pipe. Pure-Go partial
+    reimplementations exist (gokrazy/rsync among them) but coverage is partial
+    and licences are UNVERIFIED by us.
+  SMB, and this is the recommendation: on Windows, do nothing special. Open the
+    UNC path with os.Open and let the Windows redirector be the SMB client.
+    io.CopyN with your own offset, your own hash, your own progress counter, zero
+    dependencies, zero CGO, and full control over resume. On Linux/macOS either
+    use an OS mount the same way, or github.com/hirochachacha/go-smb2 (or the
+    CloudSoda fork) for a userspace client.
+
+STINKS
+  - rsync's licence. GPLv3 is the reason a company the size of Apple shipped a
+    19-year-old binary rather than upgrade.
+  - No rsync on Windows without vendoring a Cygwin-based distribution.
+  - No job identity, no persistence, no structured progress. rsync fails every
+    architectural question this survey asks, while being excellent at the one
+    thing it does.
+  - Default delta algorithm is actively counterproductive for single large opaque
+    files, and the flag that fixes it (-W) is not obvious.
+  - Forgetting --partial silently discards partial work on failure.
+  - --append (without -verify) will happily append onto a corrupt or wrong prefix.
+  - SMB over WAN/VPN is latency-bound and miserable; SMB1 is disabled by default
+    and old NAS boxes still want it.
+  - SMB gives you no integrity whatsoever. Silent bit-rot and truncated copies
+    are on you.
+  - openrsync is not feature-complete and reportedly missing flags people rely on
+    (e.g. --log-file reported missing in macOS 15.4 discussions).
+
+DONE GREAT
+  - rsync verifies every file it transfers, automatically, with a negotiated
+    modern hash. It is the only tool in this survey that treats "did it arrive
+    intact" as non-optional and non-configurable.
+  - --append-verify is exactly the right resume semantics: append, but prove the
+    prefix first. Copy this behaviour.
+  - openrsync existing under ISC means the rsync *protocol* is available without
+    the licence problem, if the protocol is what you want.
+  - SMB's simplicity is a feature. Random access to a remote file makes resume
+    trivial and needs no cooperation from anything.
+  - BITS speaking SMB natively collapses two tiers into one on Windows.
+
+ABSTRACTION ANGLE
+  For the NAS binding, rsync is a trap and SMB is the answer. rsync's virtues
+  (delta transfer, mandatory verification) are either irrelevant to opaque
+  40 GB blobs or cheaply reimplemented, and its costs (GPLv3, absent on Windows,
+  no job, screen-scraped progress) hit every axis this project cares about.
+  SMB, by contrast, hands you a seekable remote file and lets the facade own
+  offsets, chunking, hashing and progress — which is where that logic belongs
+  anyway, since it must be shared with every other binding. Take one idea from
+  rsync and leave the rest: --append-verify. Never resume without proving the
+  prefix.
+
+SOURCE PROVENANCE
+  Primary, read 2026-08-18:
+  https://raw.githubusercontent.com/hirochachacha/go-smb2/master/LICENSE
+  https://learn.microsoft.com/en-us/windows/win32/bits/life-cycle-of-a-bits-job
+    (SMB as a BITS remote-name protocol)
+  https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/robocopy
+  Secondary, read 2026-08-18: derflounder.wordpress.com (2025-04-06),
+  heise.de, appleinsider on the macOS Sequoia rsync→openrsync switch and its
+  GPLv3 cause; assorted rsync documentation and guides for --append-verify,
+  --partial and checksum negotiation.
+  Not verified by us: exact CopyFileEx COPY_FILE_RESTARTABLE wording, SMB3
+  persistent-handle behaviour on consumer NAS, CloudSoda/go-smb2 licence,
+  gokrazy/rsync licence and coverage, existence of any openrsync Windows port.

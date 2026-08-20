@@ -1,0 +1,31 @@
+LEMONADE
+========
+
+CATEGORY: local inference server (vendor-sponsored)
+LICENSE: Apache 2.0
+ADDED: 2026-08-16 — after the original 44-tool survey. That survey contained zero
+AMD, NPU or Ryzen coverage; it was compiled before Strix Halo became the target
+audience. Treat its omission as a gap in the survey, not as evidence of irrelevance.
+
+WHAT IT IS
+  AMD-sponsored local AI server that serves optimized LLMs from consumer GPUs and NPUs behind an OpenAI-compatible API (default http://localhost:13305/v1). One-click Windows installer that auto-detects hardware, selects a backend, and registers itself as a service. Ships a desktop app with a visual Model Manager, plus bundled image generation, speech-to-text and text-to-speech.
+
+ARCHITECTURE / SEAMS
+  A dispatch layer over multiple pluggable inference backends rather than a single engine: llamacpp (Vulkan / ROCm / CUDA / Metal / CPU), flm and ryzenai-llm for the XDNA2 NPU, experimental vllm on ROCm, plus whispercpp, kokoro and sd-cpp for non-text tasks. Automatic hardware detection chooses the backend. Model formats: GGUF, ONNX, SafeTensors, FLM. Acquisition via Model Manager UI, `lemonade pull`, and Hugging Face Hub, with custom local imports.
+
+STINKS
+  - Ecosystem breadth is its weak flank: validated integrations are a small fraction of Ollama's (Open WebUI, LangChain, LlamaIndex, Continue, Dify, n8n).
+  - Far less adopted than Ollama (~95k stars, ~52M monthly downloads) despite vendor backing.
+  - AMD-first by construction; NVIDIA/Apple support exists but is not the point of it.
+  - No documented handling of concurrent model residency or memory contention — see ABSTRACTION ANGLE.
+  - UNVERIFIED: whether `lemonade pull` verifies a digest on download or on load. Untested as of this writing; must be measured, not assumed.
+
+DONE GREAT
+  - It is the only thing that unlocks the XDNA2 NPU on Ryzen AI 300/400 and Strix Halo. llama.cpp and Ollama cannot.
+  - Removes the setup friction that four community guides exist to explain: "no manual ROCm flags, no GPU target strings, one install."
+  - Explicitly supports gfx1151 / Ryzen AI MAX+ Pro 395 — the exact hardware of our candidate audience.
+  - One API covering text, image, speech-in and speech-out, where competitors are text-only.
+  - Apache 2.0, so forkable and contributable without permission.
+
+ABSTRACTION ANGLE
+  Lemonade occupies the backend-dispatch + acquisition + client layers for AMD hardware, and it already claims the seam our F-track hypothesis assumed was open: setup friction on Strix Halo. That wedge belongs to the silicon vendor now. What it visibly does NOT claim is arbitration between concurrent consumers of one memory pool — its own docs discuss single-model inference and are silent on simultaneous residency, context switching, and pooling on shared unified memory. On a 128 GB unified-memory machine that is the binding constraint, and it is unclaimed by the party best positioned to claim it. If the memory seam is real, Lemonade is both the strongest evidence that a vendor will not solve it and the best integration target for a layer that does — Apache 2.0, NPU-capable, and pointed at the same buyer.

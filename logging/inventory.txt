@@ -1,0 +1,135 @@
+LOG SPRAWL — MEASURED
+=====================
+
+CATEGORY: measurement, executing research/tools/logging.txt item 1
+MEASURED: 2026-08-18, on the owner's machine (Windows 11 Pro, 32 cpu)
+BY: the main session, directly. Three delegated attempts died before writing
+    anything (two watchdog stalls, one API 529), so this was done inline.
+STATUS: the pre-declared kill condition FIRES on the disk-wear half. Findability
+        survives, weakly. Read the VERDICT.
+
+WHAT WAS SEARCHED
+  ~/.ollama, ~/.lmstudio, ~/.cache/huggingface, ~/.cache/lemonade,
+  %LOCALAPPDATA%/Ollama, %LOCALAPPDATA%/lemonade_server,
+  %LOCALAPPDATA%/AMD/AI_Bundle (this is where ComfyUI actually lives on this
+  machine — not ~/ComfyUI), %APPDATA%/Jan.
+  Patterns: *.log, *.log.*, *log*.txt, *.jsonl.
+  Excluded as false positives: a vim help file (pi_logipat.txt) and a
+  node_modules turbo-build.log inside an LM Studio plugin.
+
+RAW TABLE (bytes, mtime, path — sorted by size)
+       1244744  2026-08-16 12:39  ~/.cache/huggingface/xet/logs/xet_20260816T105006493+0300_35624.log
+        563651  2026-08-16 17:35  ~/.cache/huggingface/xet/logs/xet_20260816T172523160+0300_12620.log
+        423381  2026-08-15 12:40  %LOCALAPPDATA%/Ollama/upgrade.log
+         95873  2026-08-16 18:45  ~/.lmstudio/server-logs/2026-08/2026-08-16.1.log
+         57559  2026-08-18 11:38  ~/.lmstudio/server-logs/2026-08/2026-08-18.1.log
+         56979  2026-08-15 13:11  %APPDATA%/Jan/data/logs/app.log
+         42592  2026-08-16 20:59  %LOCALAPPDATA%/AMD/AI_Bundle/ComfyUI/ComfyUI/user/comfyui.prev2.log
+         30202  2026-08-16 17:54  %LOCALAPPDATA%/Ollama/server.log
+         22199  2026-08-16 21:07  %LOCALAPPDATA%/AMD/AI_Bundle/ComfyUI/ComfyUI/user/comfyui.prev.log
+         12712  2026-08-16 22:57  %LOCALAPPDATA%/AMD/AI_Bundle/ComfyUI/ComfyUI/user/comfyui.log
+         11315  2026-08-15 12:58  %APPDATA%/Jan/data/threads/306a4761-.../messages.jsonl
+          9832  2026-08-17 20:17  ~/.lmstudio/server-logs/2026-08/2026-08-17.1.log
+          3623  2026-08-15 22:45  %LOCALAPPDATA%/Ollama/server-1.log
+          3354  2026-08-15 09:52  %LOCALAPPDATA%/Ollama/server-3.log
+          2816  2026-08-15 12:38  %LOCALAPPDATA%/Ollama/server-2.log
+          2418  2026-08-15 12:36  %LOCALAPPDATA%/Ollama/app-3.log
+          1779  2026-08-16 10:42  %LOCALAPPDATA%/AMD/AI_Bundle/ComfyUI/comfyui_log.txt
+          1575  2026-08-15 12:38  %LOCALAPPDATA%/Ollama/app-2.log
+          1379  2026-08-16 21:18  %LOCALAPPDATA%/AMD/AI_Bundle/ComfyUI/_comfyui.log
+          1066  2026-08-16 18:46  %LOCALAPPDATA%/Ollama/app.log
+           722  2026-08-15 22:53  %LOCALAPPDATA%/Ollama/app-1.log
+           258  2026-08-16 12:39  %LOCALAPPDATA%/AMD/AI_Bundle/ComfyUI/_download.log
+            83  2026-08-16 17:35  %LOCALAPPDATA%/AMD/AI_Bundle/ComfyUI/_dl2.log
+
+TOTALS
+  log files                 23
+  total bytes        2,590,112  (2.47 MiB)
+  mtime span        2026-08-15 .. 2026-08-18  (about 3 days of ordinary use)
+  distinct directories       7
+  distinct root trees        4  (~/.cache, ~/.lmstudio, %LOCALAPPDATA%, %APPDATA%)
+  largest single file  1,244,744 bytes (HuggingFace xet)
+
+  For scale, measured on the same machine the same day with du:
+  116 GB of model weights across FOUR stores that do not know about each other —
+  LM Studio 44 GB, Lemonade 26 GB, Ollama 23 GB, HuggingFace cache 23 GB.
+  Logs are 0.002% of that.
+
+BY TOOL
+  HuggingFace (xet)       2 files  1,808,395 B   69.8%
+  Ollama                  9 files    469,157 B   18.1%
+  LM Studio               3 files    163,264 B    6.3%
+  ComfyUI (AMD bundle)    7 files     81,002 B    3.1%
+  Jan                     2 files     68,294 B    2.6%
+  Lemonade                0 files          0 B    0.0%   (none found)
+
+ROTATION AND PLACEMENT, PER TOOL
+  LM Studio   Best behaved. server-logs/<YYYY-MM>/<YYYY-MM-DD>.<n>.log — dated,
+              foldered, plainly capped per day. Predictable.
+  Ollama      Numbered-suffix rotation (app.log + app-1..3, server.log +
+              server-1..3), one flat directory. Predictable. upgrade.log is the
+              single largest Ollama file at 423 KB and shows no sign of rotating.
+  HuggingFace ONE FILE PER PROCESS INVOCATION:
+              xet_<timestamp>_<pid>.log. Never rotated, never collected, and it
+              is 70% of all log bytes on this machine from two invocations. This
+              is the one place where the growth story is plausible, and it is the
+              same subsystem with the open stall bugs (see research/transfer/
+              huggingface.txt).
+  ComfyUI     The scattered one. FOUR differently-named log files across TWO
+              directories: comfyui.log/.prev/.prev2 (a hand-rolled 3-generation
+              rotation) under ComfyUI/user/, plus comfyui_log.txt, _comfyui.log,
+              _download.log and _dl2.log dumped in the install root. The
+              underscore-prefixed ones look like an installer's or launcher's
+              scratch output, not the app's own logging.
+  Jan         app.log under data/logs, predictable. messages.jsonl inside a
+              per-thread directory is conversation data, not a log; counted here
+              only because it matched the pattern, and it should not be.
+  Lemonade    No log files found at all under either of its two directories,
+              despite holding 26 GB of models there. Either it does not log to
+              disk or it logs somewhere not searched.
+              UNCERTAIN — worth one more look before relying on this.
+
+GROWTH RATE
+  NOT OBSERVED. The instruction to sample size over an interval was abandoned
+  because a long in-agent wait trips the harness watchdog, and it killed two
+  attempts. Accumulated volume over the ~3-day mtime span is the number used
+  instead, which is the more conservative reading anyway.
+
+VERDICT — against the kill condition stated in advance
+  research/tools/logging.txt wrote, before any data existed:
+    "if every tool already writes to a predictable per-user location and total
+     log volume is under a few tens of MB/day, there is no seam here and this
+     file should record that and stop."
+
+  1. VOLUME: DEAD, decisively. 2.47 MiB accumulated over roughly three days,
+     against 116 GB of model weights on the same disk. The disk-wear and
+     write-amplification argument is not merely unproven, it is refuted by four
+     orders of magnitude. Do not make this argument again.
+
+  2. PREDICTABLE LOCATION: MOSTLY YES, and the exception is small. LM Studio,
+     Ollama and Jan each write to one predictable per-user directory. ComfyUI is
+     genuinely scattered — 4 names across 2 directories — and HuggingFace grows a
+     new file per process forever. So the "can the user find them?" number is
+     SEVEN directories across FOUR root trees. That is annoying. It is not
+     system-degrading.
+
+  3. THEREFORE: on these numbers, log placement/budget/retention does NOT justify
+     building a logging service on its own. Recorded, and stopped, as the file
+     said to.
+
+WHAT SURVIVES, AND IT IS A DIFFERENT ARGUMENT
+  Logging should not be pitched as its own product on this evidence. What it can
+  be is a CONSUMER of the job/service substrate: once a system service exists
+  with discovery and delegation (see research/transfer/SUMMARY.txt and
+  research/async/), an app logging to it instead of to a private file costs
+  almost nothing to add and gives one enumerable sink for free. That is a
+  near-zero-cost feature of an abstraction justified elsewhere — not a
+  justification for building one.
+
+  The two findings above that are worth carrying forward:
+   - HuggingFace xet writes an unrotated log per process and accounts for 70% of
+     all log bytes here. If any single thing gets fixed, it is that one, and it
+     is in the same subsystem already implicated in the resume failures.
+   - ComfyUI's four ad-hoc log files are a symptom of the same thing that makes
+     it identify models by filename: nothing in it has an owner. Relevant to the
+     fork, not to a logging product.

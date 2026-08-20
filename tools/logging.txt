@@ -1,0 +1,92 @@
+LOGGING — as a candidate abstraction
+====================================
+
+CATEGORY: cross-language abstraction candidate (not a tool)
+ADDED: 2026-08-16, from the owner's observation.
+STATUS: half of this is already solved by others; the other half is open. Read both.
+
+THE OWNER'S OBSERVATION
+  "C# has a logging interface specifically, and other languages have logging libraries —
+  sadly no separation of interface vs implementation, but that is where we come in. Log
+  files going to random places (at least on Windows) is unacceptable and system
+  degrading (flashes to disk)."
+
+PART ONE — THE INTERFACE SEAM IS ALREADY TAKEN, AND THAT MATTERS
+  The interface/implementation split for logging is not missing. It is the single most
+  successful instance of that split in software, arrived at independently in most major
+  languages:
+
+    Java    SLF4J — "Simple Logging Facade for Java", a facade with swappable bindings
+            to Logback, log4j2 and others. Shipped 2005 and effectively won.
+    .NET    Microsoft.Extensions.Logging.ILogger — a genuine interface with Serilog,
+            NLog, console and debug implementations behind it.
+    Go      log/slog in the standard library (Go 1.21+): slog.Handler is the interface,
+            handlers are the implementations.
+    Rust    the `log` crate as facade, with env_logger, tracing and others behind it.
+    Python  logging with Handler/Formatter as the extension points.
+
+  Do NOT pitch "logging needs an interface". It has several, they work, and a claim that
+  it does not will be refuted by any reviewer in one sentence.
+
+  What this is instead is EVIDENCE FOR the method. Every one of these facades was
+  EXTRACTED after many implementations existed, not designed first — SLF4J came after
+  log4j, commons-logging and java.util.logging had all shipped and fought. And every one
+  of them abstracts a RECORD (level, timestamp, message, structured fields) plus a
+  handoff, never control flow. That is exactly METHOD.md §5 (extract, do not design) and
+  §6 (records and protocols cross languages; control flow does not). Logging is the
+  worked example that the method describes something real.
+
+PART TWO — THE UNCLAIMED HALF: WHERE LOGS GO AND WHAT THEY COST
+  None of the facades above answer any of these:
+
+    - WHERE does the file land? Every tool picks its own directory. On Windows the
+      result is scattered across %LOCALAPPDATA%, %APPDATA%, %PROGRAMDATA%, the install
+      directory, the working directory, and Docker volumes.
+    - HOW MUCH does it write? No shared budget, no shared rate limit.
+    - IS IT ROTATED, capped, or retained to any policy?
+    - CAN THE USER FIND IT? There is no enumerable answer to "show me every log this
+      machine's AI tools are writing."
+    - WHAT DOES IT COST THE DISK? Chatty per-token or per-step logging on an SSD is
+      write amplification the user never agreed to. UNVERIFIED AS A NUMBER — see below.
+
+  This is a placement, budget and retention problem, not an API problem. It is not
+  addressed by SLF4J, ILogger, slog, or any of them, because they all stop at "hand the
+  record to a handler" and the handler's destination is each application's private
+  decision.
+
+WHY IT FITS THIS PROJECT SPECIFICALLY
+  It is the same thesis, not a side quest. The stated reason to draw a boundary is that
+  a named boundary is the only place where what crosses it can be seen, recorded and
+  refused (README, METHOD §2). A log IS the record of a crossing. METHOD §2's design
+  procedure is literally "write the log line first". So a shared, enumerable, budgeted
+  destination for those records is the same abstraction viewed from the other end.
+
+  It also has the same structural property as the memory seam: it is horizontal. No
+  vendor and no framework will fix log placement across ComfyUI, Ollama, llama.cpp and
+  Lemonade, because each one only controls its own process.
+
+WHAT MUST BE MEASURED BEFORE ANY OF THIS IS BUILT
+  Nothing here is evidenced yet. It is one person's observation plus a plausible
+  mechanism. The numbers that would make it real, in order of cheapness:
+
+  1. Enumerate every log file the machine's AI tools write: full path, size, growth
+     rate over an hour of ordinary use. Include ComfyUI, Ollama, llama.cpp, Lemonade,
+     LM Studio and the HuggingFace cache.
+  2. Measure bytes written to disk during one hour of normal inference, split into
+     model reads, log writes and everything else. Windows: Resource Monitor or
+     PerfMon disk-write counters per process.
+  3. Then, and only then, decide whether the write volume is material against an SSD's
+     endurance. The honest kill condition: if logging is a rounding error next to model
+     loading and page-file traffic, the disk-wear argument is dead and the case rests
+     on findability alone, which is a much weaker case.
+
+  Kill condition for the whole idea, stated before the data: if every tool already
+  writes to a predictable per-user location and total log volume is under a few tens of
+  MB/day, there is no seam here and this file should record that and stop.
+
+PRIOR ART TO READ BEFORE PROPOSING ANYTHING
+  systemd-journald (Linux: one enumerable sink, structured, rate-limited, with
+  retention policy) and Windows ETW / Event Log are the existing horizontal answers on
+  their platforms. Any proposal must state plainly why those are not the answer for
+  this case — and "because tools do not use them" is a real reason, but it is an
+  adoption argument, not a technical one.

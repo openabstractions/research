@@ -1,0 +1,371 @@
+LEMONADE — DOWNLOAD AND MODEL-STORE INTEGRATION
+===============================================
+
+LICENSE: Apache-2.0 (permissive; patent grant included. Forkable, contributable,
+  and combinable with our facade without licence friction)
+LANGUAGE: C++ — NOT Python.  *** CORRECTION TO THE BRIEF ***
+UPSTREAM PINNED AT: lemonade-sdk/lemonade @ 4136cb649d937f460b8d36a5230ab7060c2c58e4
+  (main, 2026-08-18). Line numbers are against that commit.
+  Permalink form: https://github.com/lemonade-sdk/lemonade/blob/4136cb6/<path>#L<n>
+SURVEYED: 2026-08-19
+SEE ALSO: research/tools/lemonade.txt (what it is), research/transfer/SUMMARY.txt.
+LOCAL FOOTPRINT: 26 GB of models on this machine (measured by the coordinator,
+  2026-08-19). This is not a toy install; its store layout is load-bearing.
+
+
+*** CORRECTION: LEMONADE IS A C++ PROJECT NOW ***
+  research/tools/lemonade.txt describes it as Python (Apache 2.0). The licence
+  is right; the language is not, and the brief inherited the error. At HEAD the
+  server, CLI, model manager and every backend are C++ under src/cpp/. The only
+  Python file remaining anywhere under src/ is
+  src/cpp/installer/generate_tauri_fragment.py, a build-time helper. The desktop
+  app is Tauri (Rust shell + web front end) under src/app/.
+  CONSEQUENCE FOR THE PLAN: a Lemonade fork of the downloader is C++ work, and
+  our facade cannot be a Python package if it is to be linked in-process here.
+  Either the facade exposes a C ABI / is itself C++, or Lemonade integrates
+  across a process boundary. This is the biggest single planning surprise in the
+  survey after the ComfyUI licence question.
+  UNCERTAIN: when the migration happened and whether a legacy Python package is
+  still published on PyPI for older installs. Not investigated.
+
+
+WHERE THE DOWNLOAD CODE IS
+  Unlike the other two, there is ONE downloader, it is properly factored, and it
+  is the best-engineered of the three by a clear margin.
+
+  THE TRANSPORT LAYER
+    src/cpp/include/lemon/utils/http_client.h
+      struct HttpResponse                     (status, body, headers, curl_code)
+      struct DownloadResult                   — success, cancelled, error_message,
+        curl_error, curl_code, http_code, bytes_downloaded, total_bytes,
+        can_resume, disk_full, permanent
+      struct DownloadOptions                  — see below, this is the contract
+      using ProgressCallback = std::function<bool(size_t downloaded, size_t total)>
+        (returning false CANCELS — cancellation is built into the callback)
+      class HttpClient
+        static DownloadResult download_file(url, output_path, callback,
+                                            headers, options, policy)
+        static DownloadResult download_attempt(... resume_from ...)  [private]
+      enum class HttpSecurityPolicy — ExternalHttpsOnly (default) /
+        TrustedLoopback / AllowInsecureHttp. A real trust boundary, enforced per
+        call, governing schemes and redirect hops.
+      create_throttled_progress_callback(resume_offset)  — console helper
+    src/cpp/server/utils/http_client.cpp      (1313 lines)
+      HttpClient::download_file                L1039  — retry/resume/verify loop
+      partial_path = output_path + ".partial"  L1055
+      stale-.partial reconciliation            L1060-L1075
+      resume_offset = file_size(.partial)      L1121
+      hash verification before commit          L1181-L1200
+      atomic rename .partial -> final          L1204-L1218 (copy+delete fallback)
+      download_attempt                         L771
+        fopen mode "ab" when resuming, "wb" otherwise  L785
+        CURLOPT_RESUME_FROM_LARGE              L815
+        HTTP 416 handling when the local file is already >= remote  L966-L1012
+
+  THE ORCHESTRATION LAYER
+    src/cpp/include/lemon/model_manager.h
+      struct DownloadProgress                  L57-L68 — includes
+        bytes_previously_downloaded ("resume offset or skipped file"), i.e.
+        resume is a first-class concept in the progress contract, not an
+        afterthought
+      using DownloadProgressCallback           L72 (returns bool -> cancel)
+      download_model(name, ...)                L234
+      download_registered_model(info, ...)     L240
+      download_from_registry_engine(...)       L305  — "shared remote-registry
+        download engine. The default BackendOps::download_model delegates here;
+        flm/cloud override with their own download."
+      download_from_huggingface_engine(...)    L310
+      download_from_manifest(json, headers, cb) L428
+      get_hf_cache_dir()                       L314
+      backend_self_manages_downloads(recipe)   L297
+      download_locks_mutex_                    L469-L471 — serialises concurrent
+        downloads writing into the same snapshot, keyed by checkpoint repo
+    src/cpp/server/model_manager.cpp
+      download_from_manifest                   L4459 — per-file loop, disk-space
+        pre-check that CREDITS existing .partial bytes (L4474-L4520) so a resumed
+        download is not falsely rejected for insufficient space
+      HttpClient::download_file call           L4643
+    src/cpp/cli/hf_pull.cpp                    — `lemonade pull` CLI front end
+    src/cpp/include/lemon/backends/hf_cache_util.h + server/backends/hf_cache_util.cpp
+      active_snapshot_path(model_cache_path)   — resolves snapshots/<refs/main>
+      repo_id_to_cache_dir_name(repo_id, registry_source)
+      exists() / dir_options() — symlink-tolerant, because MSVC's std::filesystem
+      refuses untrusted reparse points on Windows (real portability scar tissue)
+
+  ALL call sites of HttpClient::download_file — SIX, repo-wide:
+    src/cpp/server/model_manager.cpp                       L4643   (models)
+    src/cpp/server/backends/backend_utils.cpp              L652, L709, L1125
+                                                           (backend binaries)
+    src/cpp/server/backends/whispercpp/whispercpp_server.cpp L196
+    src/cpp/cli/recipe_import.cpp                          L179
+  That is the entire fork surface for the transport.
+
+
+WHAT IT USES TO TRANSFER
+  libcurl (`curl_easy_*` / CURLOPT_*), wrapped by its own HttpClient. Not
+  huggingface_hub, not the HF Python client, not aria2, not a vendored copy of
+  anything.
+
+  DownloadOptions defaults, verbatim from http_client.h:
+    max_retries              = 5
+    initial_retry_delay_ms   = 1000     (doubles each attempt)
+    max_retry_delay_ms       = 60000
+    resume_partial           = true     <- ON BY DEFAULT
+    low_speed_limit / _time  = 0        (deliberately disabled)
+    connect_timeout          = 30
+    no_progress_timeout      = 60       (seconds without a byte before abort)
+    range_retry_on_zero_byte_retry = true
+    force_initial_range_request    = false
+    expected_hash / expected_hash_algorithm
+  The hash field accepts plain hex or `sha256:<hex>`, `sha1:<hex>`, or
+  `git-sha1:<hex>`, and the header documents WHY: git-sha1 is
+  SHA1("blob <size>\0" + bytes), which is what Hugging Face returns as the ETag
+  for non-LFS files, while SHA256 covers LFS objects and release assets. That is
+  a correct and non-obvious piece of Hub protocol knowledge, implemented rather
+  than hand-waved.
+
+  HUGGINGFACE_HUB v1.0 REGRESSION EXPOSURE: NONE, BY CONSTRUCTION — AND THIS IS
+  THE INTERESTING PART. Lemonade talks the Hugging Face HTTP API and writes the
+  Hugging Face cache layout, but it does NOT use the huggingface_hub client. So
+  the v1.0 removal of `resume_download` and the dropping of hf_transfer cannot
+  regress it. It independently reimplemented resume and kept it. Per
+  research/transfer/SUMMARY.txt [4], huggingface_hub #4196 (2026-05-06) shows a
+  16.9 GB Hub download restarting from ~404 MB after a system suspend; Lemonade
+  is not subject to that failure because it never calls the regressed code.
+  Of the three targets, Lemonade is the one that ALREADY SOLVED the problem this
+  project exists to solve. That is the central finding of this file.
+
+
+WHAT HAPPENS ON SLEEP / PROCESS DEATH
+  SURVIVES, and it is the only one of the three that survives a HARD KILL
+  without throwing away a large block of progress.
+
+  - Bytes land in `<output>.partial` (http_client.cpp L1055) and are appended to
+    in "ab" mode (L785). The resume offset is simply the size of that file on
+    disk (L1121) — a filesystem fact, not a checkpoint that can go stale. There
+    is no sidecar to lose and no part-granularity cliff: kill the process at any
+    instant and you lose at most the OS write buffer.
+  - Resume is a real HTTP range resume via CURLOPT_RESUME_FROM_LARGE (L815),
+    with 416 handled explicitly for the "local already >= remote" case
+    (L966-L1012).
+  - Sleep / stall: no_progress_timeout = 60s aborts a dead connection, then the
+    retry loop backs off exponentially (1s -> 60s cap, 5 attempts) and resumes
+    from the .partial offset.
+  - Commit is atomic: verify hash if one was supplied, THEN
+    `fs::rename(.partial -> final)` (L1204-L1206), with a copy+delete fallback if
+    rename fails across devices. A truncated file can never appear at the final
+    name. This is exactly what ComfyUI-Manager lacks.
+  - On hash mismatch the .partial is deleted, resume_offset reset to 0, and the
+    file re-downloaded from scratch (L1181-L1200). Correct, if bandwidth-costly.
+  - disk_full is detected and short-circuits the retry loop immediately rather
+    than burning bandwidth (L1176-L1180). download_from_manifest also does a disk
+    space PRE-check that credits existing .partial bytes.
+  - Cancellation is cooperative and immediate via the ProgressCallback return
+    value; `cancelled` is distinguished from `error` in DownloadResult.
+
+  THE REMAINING WEAKNESS IS NOT THE BYTES, IT IS THE SNAPSHOT. An interrupted
+  multi-file model leaves a half-populated `snapshots/<sha>/` directory, and the
+  bugs upstream actually had were all about whether that directory is mistaken
+  for a completed model. Their fix is a marker file, `.download_manifest.json`,
+  written into the in-progress snapshot:
+    src/cpp/server/model_manager.cpp        L693, L2196, L4969
+    src/cpp/server/backends/llamacpp/llamacpp_gguf.cpp  L54
+    src/cpp/server/backends/backend_ops.cpp L105-L108 — "A snapshots directory
+      without a usable refs/main is an interrupted or ..." (incomplete state)
+  Presence of the marker => the snapshot is in flight and must not be served.
+
+  ISSUE EVIDENCE (lemonade-sdk/lemonade)
+    #682   closed 2025-12-09  "[Bug] Reported issues cancelling/resuming
+                              downloads". User verbatim: "Another issue I keep
+                              having because of bad internet is the model
+                              download crashes halfway and then won't load but
+                              won't delete". The half-state problem, from a real
+                              user on a bad connection.
+    #692   closed 2025-12-09  PR: add pause and resume to download manager.
+    #1536  closed 2026-04-04  PR (merged 2026-07-25): "resume downloads across
+                              HuggingFace commit hash changes". Excellent
+                              root-cause writeup: the HF API returns the latest
+                              commit SHA on every call, so if a download is
+                              interrupted and the repo ADVANCES before resume, a
+                              fresh snapshots/<new_sha>/ is created and
+                              everything re-downloads, orphaning the partial.
+                              Fix renames the interrupted snapshot forward so
+                              download_from_manifest resumes in place. This is a
+                              failure mode our facade must handle too — it is
+                              not Lemonade-specific, it is inherent to
+                              revision-pinned stores.
+    #2876  closed 2026-08-02  PR (closed 2026-08-07): "keep interrupted
+                              variantless model downloads resumable". Root cause
+                              stated upstream: the resolver returned
+                              model_cache_path for checkpoints without an
+                              explicit variant, and an interrupted download
+                              already creates that directory, so a cache rebuild
+                              after restart marked the model as downloaded when
+                              it was not. Now a snapshots/ dir without a usable
+                              active ref is treated as INCOMPLETE.
+    #2305  open  2026-06-18   PR: model download race condition — adds
+                              awaitExistingModelDownload plus mutex locking in
+                              ModelManager and HttpClient so concurrent requests
+                              cannot corrupt a shared snapshot.
+    #2452  open  2026-06-27   PR bundle incl. "HF download resume".
+    #2165  closed 2026-06-09  corrupted speed/ETA display during finalizing
+                              (cosmetic, not data).
+    #2448  open  2026-06-27   PR: offline guard before attempting download.
+    #3127  open  2026-08-13   TRELLIS-3D downloads the ENTIRE repo including
+                              q4/ and q8/ variants; no way to select a
+                              quantization. Relevant to us: file SELECTION, not
+                              transfer, is where the waste is.
+    #2327  open  2026-06-20   model downloader can't download SD models.
+    #1585  open  2026-04-08   feature request: configurable download speed limit.
+  Read as a set: the transport bugs are FIXED and the remaining open ones are
+  about selection, concurrency and policy. That is a mature downloader.
+
+
+WHERE MODELS GO, AND HOW THEY ARE NAMED
+  THE HUGGING FACE HUB CACHE LAYOUT, reimplemented in C++.
+    <hf_cache>/models--<org>--<repo>/
+        refs/main                       -> commit sha
+        snapshots/<commit-sha>/<files>
+        blobs/<sha256>                  (see the caveat below)
+        snapshots/<sha>/.download_manifest.json   while in flight
+    Naming: src/cpp/server/model_registry.cpp
+      registry_repo_cache_dir_name(repo_id, source)   L961-L970
+        prefix "models--" for Hugging Face,
+               "modelscope--models--" for ModelScope,
+        then repo_id with every '/' replaced by '--'.
+      ModelScope is a first-class second registry sharing the same root under a
+      separate namespace (docs/embeddable/models.md L75).
+
+    *** THE CAVEAT THAT MATTERS FOR A SHARED STORE ***
+    Lemonade READS the HF blobs+symlinks layout but does NOT WRITE it. Verbatim
+    from src/cpp/server/model_manager.cpp L435-L443:
+      "HF hub downloads use: snapshots/<hash>/file.gguf -> ../../blobs/<sha256>
+       ... This would need integration tests that use huggingface_hub Python
+       tooling (e.g. hf_hub_download()) to create the blob+symlink layout, since
+       Lemonade's own downloader writes real files without blobs."
+    So a cache populated BY Lemonade contains real files inside snapshots/, while
+    a cache populated by huggingface_hub contains symlinks into blobs/. Both are
+    readable by Lemonade (cleanup_orphaned_blob at L445 handles the symlink case
+    and garbage-collects unreferenced blobs). The layouts are READ-COMPATIBLE but
+    NOT WRITE-IDENTICAL. Any shared store we build has to tolerate both shapes in
+    the same tree, and cannot assume blobs/ is authoritative. This is a concrete,
+    citable requirement for the store abstraction.
+
+  Consequence for cross-tool dedup: Lemonade's identity key is
+  (registry, repo_id, commit-sha, filename). Ollama's is a sha256 over an OCI
+  layer. ComfyUI's is (folder key, filename). Only Lemonade's maps cleanly onto
+  an upstream, publicly resolvable identity — which makes it the best candidate
+  to be the CANONICAL layout for a shared store.
+
+
+EXTERNAL MODEL DIRECTORY TODAY
+  YES — and it is the only one of the three where cross-tool sharing is an
+  EXPLICIT, DOCUMENTED PRODUCT GOAL rather than a side effect.
+
+    src/cpp/server/utils/path_utils.cpp
+      get_cache_dir()          L160 — set_cache_dir() at startup, else
+                                      LEMONADE_CACHE_DIR, else platform default
+      default_hf_cache_dir()   L178
+      resolve_hf_cache_dir()   L180-L197 — follows the Hugging Face spec exactly:
+                                      1. HF_HUB_CACHE
+                                      2. HF_HOME (+ "/hub")
+                                      3. ~/.cache/huggingface/hub
+      get_hf_cache_dir()       L199-L208 — an explicitly configured models_dir
+                                      wins over all env vars; relative paths are
+                                      resolved against the executable dir
+
+    Config keys (docs/embeddable/models.md L18-L51):
+      models_dir        primary store; where `pull` writes. Default "auto",
+                        documented as "respect my user's HF_HOME and HF_HUB_CACHE
+                        environment variables, in accordance with the Hugging
+                        Face Hub standard".
+      extra_models_dir  an additional SEARCH PATH for GGUF LLMs to import
+                        without re-downloading.
+    Set via `lemonade config set models_dir=...` / `extra_models_dir=DIR`.
+    docs/dev/model-registries.md L9 records `extra_models_dir` as a recognised
+    ModelInfo::source alongside local_upload and local_path — imported models
+    keep their provenance.
+
+    The stated motivation, docs/dev/philosophy.md L117, verbatim:
+      "People wanted to use Lemonade alongside other LLM tools without
+       duplicating model files. We added `lemonade config set
+       extra_models_dir=DIR` to import already-downloaded models into Lemonade
+       without re-downloading."
+    docs/embeddable/models.md L27 even names the downside honestly: "other
+    applications could manage models that your app relies on" — i.e. they have
+    already reasoned about shared-store contention.
+
+    Deletion safety: models discovered via --extra-models-dir cannot be deleted
+    through the API (model_manager.cpp L5063-L5066: "Models in --extra-models-dir
+    are user-managed"). Read-only-by-policy for foreign files. Exactly the
+    behaviour a shared store wants from a participant.
+
+  DOCS-VS-REALITY CONFLICT, UNRESOLVED:
+    #2283 open 2026-06-17 — a Manjaro/Arch user reports that the documented
+    HF_HOME / HF_HUB_CACHE behaviour did not take effect after install
+    ("I found no such behavior"), against
+    https://lemonade-server.ai/docs/guide/faq/#1-where-are-models-stored-and-how-do-i-change-that
+    A follow-up comment (2026-07-01) says Lemonade defaults to /var/lib/lemonade
+    on Linux, which can fill a small root partition while the user's home has
+    space. STILL OPEN. The code path at path_utils.cpp L180-L208 does read those
+    env vars, so the likely explanation is the service running as a different
+    user (the same class of bug as OLLAMA_MODELS under systemd) or
+    set_cache_dir()/models_dir being written at install time and thereafter
+    winning over the env vars (get_hf_cache_dir checks g_models_dir FIRST).
+    PREFER THE USER REPORT OVER THE DOC: on Linux, assume the env vars may be
+    overridden by installed config and set `models_dir` explicitly instead.
+    NOT VERIFIED by us on this machine.
+
+
+HOW PLUGGABLE IS IT?
+  EASIEST OF THE THREE, and it already has TWO layered seams.
+
+  SEAM 1 — the backend virtual (per-backend override, already exercised):
+    src/cpp/include/lemon/backends/backend_ops.h
+      class BackendOps                                          L41
+        virtual void download_model(const ModelInfo&, bool do_not_upgrade, ...)  L104
+        virtual bool invalidates_cache_after_download() const    L110
+        virtual bool is_downloaded(const ModelInfo&, const BackendOpsContext&)   L94
+    The default implementation delegates to
+    ModelManager::download_from_registry_engine (model_manager.h L303-L306), and
+    the flm and cloud backends ALREADY override it with their own download. So
+    "a different downloader per backend" is not a hypothetical — it is a shipped,
+    used extension point. There is also
+    backend_self_manages_downloads(recipe) (model_manager.h L297) for backends
+    that fetch their own weights.
+
+  SEAM 2 — the transport (single choke point):
+    HttpClient::download_file has exactly six call sites (listed above), all in
+    C++ we control, all taking the same DownloadOptions/ProgressCallback pair.
+    Replacing the body of that one static function routes EVERY download in the
+    product — models, backend binaries, whisper weights, recipe imports —
+    through our facade. That is a one-function change.
+
+  The existing DownloadOptions/DownloadResult/ProgressCallback triple is, frankly,
+  close to the interface our facade should expose. It already models: resume,
+  cancellation, expected hash with algorithm prefixes, disk-full, permanent vs
+  retryable failure, and a security policy for redirect targets. WE SHOULD STEAL
+  THIS SHAPE rather than invent one. Per the project's own rule — prefer adopt or
+  wrap over build — the honest reading is that Lemonade has already written a
+  large part of the abstraction we were going to write.
+
+  Estimated change size: a handful of call sites; one function body if we take
+  Seam 2. Not pervasive.
+
+
+FORK FRICTION
+  Activity: 481 commits to main between 2026-05-20 and 2026-08-19 (~5.3/day) —
+  nearly ComfyUI-level churn, far above Ollama, and vendor-funded so it is
+  unlikely to slow. HEAD moved the day before this survey.
+  Rebase risk: MODERATE-TO-HIGH by commit rate, but MITIGATED by structure: the
+  code we would touch (http_client.cpp, backend_ops.h) is infrastructure that
+  most of that churn does not go near — the churn is in backends, router,
+  server endpoints and the Tauri app. A one-function replacement behind an
+  existing virtual is about as rebase-proof as a fork gets.
+  Build friction is the real cost, not merge friction: CMake + C++ + libcurl +
+  a Tauri/Rust desktop shell + multiple vendored inference backends. Anyone
+  forking this needs a working native toolchain on Windows, which is a heavier
+  lift than `go build` or editing a .py file.
+  Apache-2.0 means no licence obligation on the fork, and it is the friendliest
+  licence of the three for CONTRIBUTING BACK — which, given that they have
+  already solved resume properly, may be more valuable than forking.

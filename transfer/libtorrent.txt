@@ -1,0 +1,151 @@
+LIBTORRENT / BITTORRENT
+=======================
+
+CATEGORY: peer-to-peer piece-based transfer engine
+LICENSE: libtorrent (arvidn/libtorrent) is BSD-3-Clause. The LICENSE file is
+multi-licensed for vendored parts: Boost Software License 1.0 for the Python
+bindings, zlib licence for the ed25519 code, public domain for the SHA-1 and
+SHA-256 implementations, APSL-2.0/BSD for one BSD-derived header. All permissive.
+*** No copyleft. Green. *** (raw LICENSE from arvidn/libtorrent RC_2_0, read
+2026-08-18)
+CAUTION: the surrounding ecosystem is not. qBittorrent GPLv2+, Transmission
+GPLv2, Deluge GPLv3, and the leading pure-Go client anacrolix/torrent is MPL-2.0
+(verified from its LICENSE file, 2026-08-18) — weak file-level copyleft, still
+outside a strict MIT/Apache/BSD allowlist.
+ADDED: 2026-08-18 — transfer-implementation survey for the download abstraction.
+
+WHAT IT IS
+  A C++ BitTorrent engine. For this project the interesting part is not the
+  peer-to-peer economics; it is that BitTorrent is the only widely deployed
+  transfer protocol whose data model is *already* the one this abstraction needs:
+  a content-addressed manifest of fixed-size pieces, each independently
+  verifiable, fetchable from any number of sources in any order.
+
+SURVIVAL
+  Process exits:  NO for the transfer, YES for the state, and the state is good.
+    torrent_handle::save_resume_data() produces a save_resume_data_alert whose
+    payload you write to a .fastresume file; write_session_params() /
+    read_session_params() persist the session (settings, DHT state, IP filters).
+    Re-add the torrent with the resume data on next start and it continues.
+    "save_resume_data_alert and save_resume_data_failed_alert are always posted,
+    regardless of the alert mask" — the library treats losing resume state as
+    unacceptable. (libtorrent.org/reference-Session.html, read 2026-08-18)
+  Reboot:         same as above. Nothing relaunches you; the state is intact.
+  Sleep/hibernate: peers drop, the session reconnects and re-announces on wake.
+    Piece state is unaffected because it is on disk and hash-verified.
+  Network loss:   YES, gracefully. This is the case BitTorrent was built for —
+    sources are expected to disappear.
+  Crucially: even with NO resume data at all, a full re-hash of the partial file
+  against the piece hashes recovers exactly what you already have. That is a
+  recovery property nothing else in this survey has. Losing the control file is
+  a cost, not a catastrophe.
+
+UNIT OF WORK
+  A TORRENT within a SESSION, handled via torrent_handle. The identity is the
+  INFO-HASH — and unlike a BITS GUID or an aria2 GID, it is globally meaningful:
+  it names the content, not a local job. Any machine, any process, any client can
+  be handed the same info-hash (or the magnet URI containing it) and be talking
+  about the same bytes.
+
+RESUME
+  Piece-level, with mandatory verification. Every piece is hashed before it
+  counts as complete: SHA-1 per piece in BitTorrent v1, SHA-256 in a Merkle tree
+  over 16 KiB blocks in v2 (BEP 52). There is no "resumed from offset and hoped"
+  mode. This is the only implementation in the survey that verifies what it
+  resumed as a structural property rather than an option.
+
+INTEGRITY
+  Yes, by construction, and it is the whole design. SHA-1 (v1) / SHA-256 Merkle
+  (v2). A corrupted piece is detected, discarded and refetched from a different
+  peer automatically. Note SHA-1 in v1 is collision-broken as a security hash —
+  fine against corruption, not a defence against a hostile swarm. v2 fixes this.
+
+PROGRESS REPORTING
+  In-process alert queue: session::pop_alerts() delivers typed alerts
+  (state_changed_alert, torrent_finished_alert, save_resume_data_alert, ...) plus
+  torrent_status polling (progress, total_done, download_rate, num_peers).
+  No RPC in libtorrent itself. The ecosystem supplies RPC — qBittorrent WebUI
+  API, Transmission RPC, Deluge RPC, rTorrent XML-RPC — and every one of those is
+  GPL. If you want a BitTorrent job server with an RPC you can talk to from Go,
+  you are shipping GPL software.
+
+DELEGATION / HANDOFF
+  Conceptually the best in the survey, mechanically the most limited.
+  A magnet URI IS a portable, self-describing, self-verifying job description. An
+  app can hand it to a service, a service to a NAS, a NAS to a peer, and every
+  recipient can independently verify what it got without trusting the sender.
+  That is precisely the delegation primitive this project says it needs.
+  What you cannot do is take over a *live* session. Handoff means: stop, keep the
+  partial file and .fastresume, and hand the info-hash plus the partial to the
+  next actor — which is fine, because re-hashing recovers the rest.
+
+PLATFORM AND BINDINGS
+  C++14/17, builds everywhere (Windows, Linux, macOS, BSD, Android). Official
+  Python bindings (Boost.Python). No official Go bindings.
+
+DRIVING IT FROM GO
+  - libtorrent from Go means CGO across a C++ ABI. Painful, and it destroys easy
+    cross-compilation. Not recommended.
+  - github.com/anacrolix/torrent is pure Go, mature ("used 24/7 in production by
+    downstream services since late 2014"), supports DHT, PEX, uTP, WebTorrent,
+    webseeds, BitTorrent v2, and offers pluggable storage backends (file, mmap,
+    bolt, sqlite) which gives you the piece-completion database for free. It is
+    the technically correct choice AND it is MPL-2.0, which fails this project's
+    stated licence bar. MPL-2.0 is per-file copyleft — using it as an unmodified
+    library dependency is generally considered safe, but that is a legal call,
+    not an engineering one, and this project said copyleft is a hard no. Flagging
+    it rather than deciding it.
+  - Third route: implement only the parts you need. Piece hashing, a .torrent /
+    magnet parser and webseed (BEP 19) fetching is a fraction of a full client
+    and needs no swarm at all. If the real requirement is "verifiable chunked
+    resume from HTTP mirrors", that is webseeds, and it is small.
+
+STINKS
+  - No seeders, no download. Model weights are not seeded. HuggingFace does not
+    serve torrents. The swarm you need mostly does not exist, which makes this a
+    LAN/private-tracker/self-hosted play, not a way to get a model from the Hub.
+  - Corporate and campus networks block BitTorrent outright, by protocol
+    signature, by port, and by policy. Many enterprises treat any BitTorrent
+    traffic as an incident.
+  - Privacy: joining a swarm publishes your IP against a specific content hash.
+    For an enterprise downloading a specific model, that is an information leak
+    some buyers will refuse outright.
+  - DHT bootstrapping, NAT traversal and hole-punching are ongoing operational
+    pain.
+  - The C++ API is large and stateful, and the alert queue must be drained or it
+    grows without bound.
+  - Every off-the-shelf RPC front end is GPL.
+
+DONE GREAT
+  - BSD-3-Clause on the engine itself.
+  - Verify-by-construction. Corruption is detected and repaired automatically,
+    including corruption you inherited from a previous run or a different tool.
+  - The info-hash / magnet URI is a real, portable, verifiable job token — the
+    delegation primitive this project is looking for, already standardised.
+  - Multi-source by default: webseeds (BEP 19) mean a torrent can be satisfied
+    entirely from ordinary HTTP mirrors with piece verification layered on top.
+    That is the useful half of BitTorrent without needing a swarm.
+  - Resume state loss is survivable via re-hash.
+
+ABSTRACTION ANGLE
+  Steal the manifest, not the swarm. What BitTorrent proves is that a transfer
+  job should be described by a content manifest (piece size, piece hashes, total
+  length) rather than by a URL, because then resume, verification, multi-source
+  and delegation all fall out for free and every participant can check the work
+  of every other. HuggingFace's Xet is the same insight with variable-size
+  chunks. Two independent designs converging on content-addressed chunking is the
+  strongest signal in this survey about what the facade's job descriptor should
+  contain. The peer-to-peer layer itself is a niche binding for the LAN and
+  private-mirror case, not a primary one.
+
+SOURCE PROVENANCE
+  Primary, read 2026-08-18:
+  https://raw.githubusercontent.com/arvidn/libtorrent/RC_2_0/LICENSE
+  https://www.libtorrent.org/reference-Session.html
+  https://raw.githubusercontent.com/anacrolix/torrent/master/LICENSE (MPL-2.0)
+  https://github.com/anacrolix/torrent (features, storage backends, production
+    claim)
+  BEP 52 (v2 / SHA-256 Merkle) and BEP 19 (webseeds) cited from working
+  knowledge, not re-read for this profile — verify before relying on details.
+  Not verified by us: anacrolix/torrent's v2 completeness, libtorrent CGO
+  feasibility in practice, current enterprise blocking rates.

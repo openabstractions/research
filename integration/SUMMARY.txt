@@ -1,0 +1,339 @@
+INTEGRATION SURVEY — SUMMARY
+============================
+
+SCOPE: the FORK SURFACE of three tools we intend to fork — where the download
+  call sites are, how pluggable they are, where the store lives, and what
+  config-only shared-store options exist today.
+SURVEYED: 2026-08-19. All facts sourced in ollama.txt / comfyui.txt /
+  lemonade.txt in this directory.
+UPSTREAM PINS: ollama/ollama d67ad83 (2026-08-15) · Comfy-Org/ComfyUI cc0fc21
+  (2026-08-17) · lemonade-sdk/lemonade 4136cb6 (2026-08-18)
+COMPANION: research/transfer/SUMMARY.txt profiles the transfer technologies
+  themselves. This file does not repeat it.
+EXCLUDED: LM Studio (closed source).
+
+
+TABLE 1 — THE FORK SURFACE
+
+                        OLLAMA          ComfyUI            LEMONADE
+  language              Go              Python             C++  (NOT Python —
+                                                           the brief was wrong)
+  licence               MIT             GPL-3.0            Apache-2.0
+                                        *** see below ***
+  download mechanism    net/http std-   CORE: NONE.        libcurl behind its own
+                        lib, 2 separate Manager: torch-    HttpClient::download_
+                        impls (16-way   vision download_   file. One impl.
+                        ranged parts;   url / requests /
+                        whole-blob)     urllib / aria2
+  transfer client       http.Default    requests, urllib,  libcurl
+                        Client (hard-   torchvision,
+                        coded) + one    optional aria2
+                        injectable one
+  survives sleep?       YES (30s stall  NO (default path). Y E S — best of the
+                        watchdog, in-   Only via optional  three. .partial +
+                        finite stall    aria2 backend.     CURLOPT_RESUME_FROM_
+                        retries)                           LARGE + 60s no-
+                                                           progress abort
+  survives hard kill?   PARTIAL — loses NO — leaves a      YES — loses only the
+                        up to one part  TRUNCATED FILE AT  OS write buffer
+                        (100MB-1GB) x   THE FINAL NAME     (offset = size of
+                        16 in flight    that looks         .partial on disk)
+                                        installed
+  verifies content?     sha256 on fresh NONE anywhere      sha256 / sha1 /
+                        download, but   on the default     git-sha1 (HF ETag
+                        NEVER re-veri-  path               aware), BEFORE the
+                        fies an exist-                     atomic rename
+                        ing blob (#17520)
+  atomic commit?        yes (rename)    NO                 yes (rename, with
+                                                           copy+delete fallback)
+  store layout          content-        filename + folder  Hugging Face Hub
+                        addressed:      across 24 model    cache: models--<org>--
+                        blobs/sha256-   type folders       <repo>/{refs,snapshots
+                        <hex> +         (brief said 12 —   /<sha>,blobs}
+                        manifests/      STALE, it is 24)   + modelscope-- prefix
+                        <host>/<ns>/                       for the 2nd registry
+                        <model>/<tag>
+  identity key          sha256 of an    (folder, filename) (registry, repo_id,
+                        OCI layer       — NO DIGEST        commit-sha, filename)
+  external dir today?   YES  OLLAMA_    YES  extra_model_  YES  models_dir /
+                        MODELS (single  paths.yaml, --     extra_models_dir,
+                        root, all-or-   models-directory,  HF_HUB_CACHE, HF_HOME
+                        nothing)        --base-directory,  (sharing is a STATED
+                                        multi-root +       product goal)
+                                        is_default
+  injection difficulty  MEDIUM          CORE: N/A (nothing EASY
+                        (no seam, but   to replace).       (2 layered seams,
+                        1 entry point,  Manager: EASY      6 call sites total,
+                        1 call site,    (env-var backend   1 function body)
+                        1 file)         swap already there)
+  upstream churn        252 commits     532 commits        481 commits
+  (2026-05-20..08-19)   (~2.8/day)      (~5.9/day)         (~5.3/day)
+  rebase risk           MODERATE-LOW    HIGH               MODERATE, mitigated
+                                        (and into the      by structure; the
+                                        hottest areas)     BUILD is the real cost
+
+
+TABLE 2 — huggingface_hub v1.0 EXPOSURE
+  v1.0 removed the `resume_download` parameter and dropped hf_transfer support.
+  Per research/transfer/SUMMARY.txt [4], huggingface_hub #4196 (2026-05-06)
+  documents a 16.9 GB download restarting from ~404 MB after a system suspend.
+  Which of our three inherited that regression?
+
+  OLLAMA    NOT EXPOSED. No Python in the download path, no Hub client, no
+            dependency. Immune.
+  ComfyUI   CORE: not exposed — huggingface_hub is not even in requirements.txt.
+            MANAGER: imports huggingface_hub but only for METADATA
+            (HfApi.repo_info, to compute a tqdm total). It fetches the bytes
+            itself with requests. So it did not inherit the regression — it
+            never had resume on that path to lose.
+  LEMONADE  NOT EXPOSED, and this is the notable one. It speaks the Hugging Face
+            HTTP API and writes the Hugging Face cache layout, but it does NOT
+            use the huggingface_hub client. It reimplemented resume in C++ and
+            kept it.
+  NET: none of the three inherited the regression, because none of them use the
+  Hub client for bytes. The regression matters to us as a WARNING about
+  depending on huggingface_hub in our own facade — the ecosystem's reference
+  implementation removed resume, and three independent projects each concluded
+  they had to write their own. That is corroboration for the facade existing,
+  not a defect to fix in these tools.
+
+
+THE ComfyUI LICENCE QUESTION — ANSWERED CLEARLY
+
+  CONFIRMED GPL-3.0, verified three ways (LICENSE file is verbatim GPLv3;
+  GitHub spdx_id GPL-3.0; pyproject.toml points at it). ComfyUI-Manager is ALSO
+  GPL-3.0 and is now a pinned dependency of core (manager_requirements.txt:
+  comfyui_manager==4.2.2), so the copyleft surface has grown.
+
+  WHAT IT DOES NOT MEAN
+    - It does not block forking. GPL-3.0 permits forking, modification and
+      commercial use outright. No permission needed; there is no CLA.
+    - It does not bite on internal use, and it does not bite on SaaS. This is
+      GPL, not AGPL — there is no network-use clause.
+
+  WHAT IT DOES MEAN
+    - The obligation triggers on DISTRIBUTION. Ship a forked ComfyUI in any
+      form — installer, container, bundled desktop app — and the complete
+      corresponding source of the whole combined work must be offered under
+      GPL-3.0.
+    - THE PLAN-BREAKING PART: the whole point is ONE shared abstraction adopted
+      by THREE forks. Import that facade into a GPL-3.0 ComfyUI fork, distribute
+      it, and the facade is being distributed as part of a GPL-3.0 combined work
+      (the FSF treats an imported Python library as a single work). We could
+      dual-licence our way out IF we own the facade outright — copyright holders
+      are not bound by their own licence — but that requires: no copyleft code
+      inside the facade, ever, and a CLA on every outside contribution. One
+      GPL contribution slipping into the facade propagates copyleft back into
+      the Apache-2.0 Lemonade fork and the MIT Ollama fork. That is exactly the
+      entanglement the project's licence policy forbids.
+    - The custom-node grey zone is officially UNRESOLVED. Issue #3362 ("Which
+      license for custom nodes?", opened 2024-04-27, citing the GPL FAQ's own
+      "borderline case" language on dynamic plugins) still has no maintainer
+      answer. Discussion #14346 covers the same ground. Two years of silence
+      means there is no authority to appeal to and no exemption to rely on.
+
+  RECOMMENDATION: DO NOT FORK ComfyUI FOR THE DOWNLOADER WORK.
+    Three independent reasons converge:
+      (a) copyleft entanglement against an explicit project policy;
+      (b) there is NOTHING TO REPLACE — core has no model downloader at all, so
+          a fork buys zero displacement (see below);
+      (c) it is already the most configurable of the three for a shared store,
+          with no fork required.
+    Integrate across a process boundary instead: our facade stays a separate,
+    permissively licensed program we own, and ComfyUI reaches it over HTTP, or
+    via a small custom node that we publish AS GPL-3.0 and that merely talks to
+    our service. Independent programs communicating over a socket are not a
+    combined work — that is the standard, defensible boundary.
+    Cheapest option of all, worth a spike: ComfyUI-Manager's model fetch goes
+    through ONE dispatcher (glob/manager_downloader.py L49 `download_url`) which
+    ALREADY branches on an environment variable to select aria2. A custom node
+    loaded at startup can simply rebind that symbol at runtime. Runtime
+    rebinding in our own process is not distribution of a modified GPL work at
+    all, and it sidesteps the licence question entirely. UNVERIFIED that import
+    ordering permits this reliably.
+    If anyone later insists on an in-process fork: that is a legal-review gate,
+    not an engineering decision.
+
+
+THE OTHER BIG SURPRISE: ComfyUI CORE HAS NO MODEL DOWNLOADER
+
+  The brief assumed all three have "built-in downloaders" to replace. ComfyUI
+  does not. Verified by exhaustion: huggingface_hub is absent from
+  requirements.txt; no hf_hub_download / snapshot_download / HfApi anywhere
+  outside the hosted-API nodes; app/model_manager.py is read-only listing and
+  previews; `requests` appears only in frontend_management.py for the frontend
+  package. The "Download" button in the missing-models panel triggers a BROWSER
+  download to the user's Downloads folder (issue #13676, open 2026-05-02, whose
+  documented workaround is `wget -P <model_folder> <url>`).
+  Server-side download is an actively CONTESTED open feature — competing PRs
+  #14586, #13961 and #12487, plus issues #12961, #13464, #8436. Forking into
+  that area means forking into a moving target and racing two open PRs.
+
+  SECOND CORRECTION: LEMONADE IS C++, NOT PYTHON. research/tools/lemonade.txt
+  says Python and the brief inherited it. At HEAD the server, CLI, model manager
+  and all backends are C++ under src/cpp/; the desktop app is Tauri. The only
+  remaining Python under src/ is a build-time installer helper. This has a
+  direct planning consequence: our facade cannot be a Python package if it is to
+  be linked in-process into Lemonade. It must be C++/expose a C ABI, or Lemonade
+  integrates over a process boundary.
+
+  THIRD CORRECTION: ComfyUI has 24 model-type folders, not 12
+  (folder_paths.py L25-L67; 27 registered keys, three of which — configs,
+  custom_nodes, datasets — are not model weights). Several keys map to multiple
+  directories (text_encoders -> {text_encoders, clip}; diffusion_models ->
+  {unet, diffusion_models}; controlnet -> {controlnet, t2i_adapter}).
+
+
+RECOMMENDATION — WHICH TOOL TO FORK FIRST
+
+  FORK OLLAMA FIRST.
+
+  Reasons, in order of weight:
+   1. It is the only target where the downloader work is BOTH necessary AND
+      tractable. ComfyUI has no downloader to replace; Lemonade's is already
+      better than what we would write first. Ollama has a real, incumbent, and
+      genuinely defective downloader that our abstraction can measurably improve.
+   2. The blast radius is the smallest in the survey and is precisely bounded:
+      ONE entry point (downloadBlob, server/download.go L476), ONE call site
+      (server/images.go L1044), ONE progress contract that is ALREADY a callback
+      (func(api.ProgressResponse)) — exactly the shape a facade wants — and ONE
+      file to replace end to end (517 lines). The second path (transfer.Download,
+      images.go L1173) adds one more call site and already accepts an injectable
+      *http.Client.
+   3. MIT. Zero licence obligation, zero entanglement risk, no legal gate.
+   4. Lowest upstream churn of the three (2.8 commits/day vs 5.9 and 5.3), and
+      download.go is a cold file relative to the runner/scheduler churn.
+   5. We would be moving WITH upstream, not against it. x/transfer/transfer.go
+      L7 carries `TODO (jmorganca): Integrate into server/download.go and
+      server/upload.go when stable.` Upstream INTENDS to collapse its two
+      download paths into one. A fork that introduces the interface is doing the
+      refactor they have already committed to in a comment, which makes an
+      upstreamable PR plausible rather than fanciful.
+   6. There are real, citable defects to fix, which makes the work
+      demonstrable rather than speculative — see the defect list below.
+   7. Go is the lightest toolchain of the three. No CMake, no CUDA, no Tauri.
+
+  THEN LEMONADE SECOND — but change the goal. Do not fork it to replace its
+  downloader; ADOPT its downloader's shape and, where we improve on it,
+  CONTRIBUTE BACK. Apache-2.0 makes that frictionless. Its
+  DownloadOptions / DownloadResult / ProgressCallback triple already models
+  resume, cancellation, expected-hash-with-algorithm-prefix (including the
+  git-sha1 form Hugging Face uses for non-LFS ETags), disk-full, permanent-vs-
+  retryable failure, and a redirect security policy. That is most of the
+  interface we were going to design. Per the project's own rule — research
+  perfects the idea, prefer adopt or wrap over build — the honest finding is
+  that Lemonade has already written a large part of our abstraction, in the
+  right shape, under the right licence. Steal the shape.
+
+  ComfyUI LAST, AND NOT AS A FORK. Process boundary or runtime rebinding only.
+
+  THE DEFECTS THAT JUSTIFY THE OLLAMA FORK (all code-confirmed, all cited in
+  ollama.txt):
+    - A blob that already exists on disk is NEVER re-verified. downloadBlob
+      returns cacheHit on a bare os.Stat, PullModel skips verifyBlob for cache
+      hits, and `ollama pull` then PRINTS "verifying sha256 digest" and
+      "success" while verifying nothing. Issue #17520 (open, 2026-08-02, with a
+      reproducer). The maintainer claim that a restart performs a "housekeeping
+      sweep" is contradicted by the code: server/fixblobs.go only renames
+      `sha256:` to `sha256-` and never hashes anything.
+    - Checkpoint granularity is ONE PART (100 MB-1 GB) written only when a chunk
+      attempt ENDS, with 16 parts in flight. A hard kill discards all sixteen
+      simultaneously. This is the mechanism behind every "restarted from zero"
+      report (#13167, #6101, #8484) — note that #13167's root-cause DIAGNOSIS is
+      wrong (it claims data lives in ~/.ollama/tmp and is deleted; it does not),
+      while its SYMPTOM is real.
+    - Sleep-during-download is unhandled upstream: PR #15668
+      ("fix(windows): prevent system sleep during model downloads and inference",
+      opened 2026-04-18) sits unmerged with zero comments.
+    - Orphaned `-partial` files are invisible to `ollama list` and waste disk
+      (#2892).
+
+
+WHERE A SHARED STORE WORKS TODAY, CONFIG ONLY, NO FORK
+
+  ALL THREE can be pointed at an external model directory right now. None of
+  them can share the SAME bytes, because the three identity schemes do not join
+  (sha256-of-OCI-layer vs filename vs repo+commit+filename, and only two of the
+  three have a digest at all). So "one shared store" today means one shared
+  MOUNT POINT with three subtrees, not one deduplicated pool.
+
+  ComfyUI — RICHEST, AND IT NEEDS NOTHING FROM US
+    extra_model_paths.yaml (loaded by main.py L130-L136 via
+    utils/extra_config.py L6 -> folder_paths.add_model_folder_path L373).
+    Supports MULTIPLE roots per type plus an `is_default` flag. CLI:
+    --models-directory (cli_args.py L257) overrides just the models folder;
+    --base-directory (L70) moves everything; --extra-model-paths-config (L71)
+    loads additional yaml.
+    Writers take element [0] of the path list, so putting the shared store first
+    makes it both the read source AND the write target.
+    BONUS: ComfyUI-Manager checks for a `download_model_base` key in
+    folder_names_and_paths (manager_server.py L391-L394) and puts everything
+    beneath it. Registering that key in extra_model_paths.yaml redirects ALL
+    Manager model downloads to a shared directory with zero code change. This is
+    the single highest-value config-only lever found in the survey.
+    CAVEAT: on the Windows Desktop package the config file has been observed to
+    be DELETED ON UPDATE — issue #10130 (open, 2025-09-30, labelled Potential
+    Bug). A config-only store is only as durable as its config file, and there
+    it is not durable. Also #11404 (extra_model_paths not working, 11 comments).
+
+  LEMONADE — SHARING IS A STATED PRODUCT GOAL
+    `lemonade config set models_dir=DIR` (primary store, where pull writes) and
+    `extra_models_dir=DIR` (an additional search path for GGUF LLMs to import
+    WITHOUT re-downloading). Default models_dir is "auto", documented as
+    respecting HF_HOME and HF_HUB_CACHE per the Hugging Face Hub standard
+    (docs/embeddable/models.md L18-L51; resolution implemented at
+    src/cpp/server/utils/path_utils.cpp L180-L208).
+    docs/dev/philosophy.md L117 states the motivation verbatim: "People wanted to
+    use Lemonade alongside other LLM tools without duplicating model files."
+    Models discovered via extra_models_dir cannot be deleted through the API
+    (model_manager.cpp L5063-L5066) — read-only-by-policy for foreign files,
+    exactly what a shared store wants from a participant.
+    CONFLICT, PREFER THE USER REPORT: issue #2283 (OPEN, 2026-06-17) — a
+    Manjaro/Arch user reports the documented HF_HOME/HF_HUB_CACHE behaviour did
+    not take effect ("I found no such behavior"), and a follow-up notes Lemonade
+    defaults to /var/lib/lemonade on Linux, which can fill a small root
+    partition. The code DOES read those env vars, but get_hf_cache_dir() checks
+    an explicitly configured models_dir FIRST — so installed config likely wins
+    over the environment. On Linux, set models_dir explicitly rather than
+    relying on env vars. NOT VERIFIED on this machine.
+
+  OLLAMA — SIMPLEST, BLUNTEST
+    OLLAMA_MODELS (envconfig/config.go L111-L123). Moves manifests + blobs +
+    partials as one tree. Single root only: no multi-root search path, no
+    read-only base with a writable overlay, no per-type redirection. The server
+    process must be able to write it — on Linux the systemd unit runs as the
+    `ollama` user, which is the usual reason it appears not to work.
+    Symlinking $MODELS/blobs at a shared store is mechanically plausible (blobs
+    are opaque files) but nothing upstream tests or supports it. UNVERIFIED.
+
+  IMMEDIATE, ZERO-CODE WIN AVAILABLE NOW: Lemonade already holds 26 GB on this
+  machine in the Hugging Face cache layout, and that layout is the only one of
+  the three keyed to a publicly resolvable identity (registry + repo + commit +
+  filename). Point ComfyUI's extra_model_paths.yaml at the GGUF-bearing
+  snapshots directories under Lemonade's cache and ComfyUI can read them without
+  a byte being copied. This is worth doing before any fork, as a measurement of
+  how much duplication actually exists.
+  CAVEAT THAT CONSTRAINS THE STORE DESIGN: Lemonade READS the HF blobs+symlinks
+  layout but does NOT WRITE it — it "writes real files without blobs"
+  (model_manager.cpp L435-L443, verbatim). A cache written by Lemonade has real
+  files inside snapshots/; one written by huggingface_hub has symlinks into
+  blobs/. Both shapes will coexist in the same tree, and the shared store cannot
+  assume blobs/ is authoritative.
+
+
+OPEN QUESTIONS / NOT VERIFIED
+  - Ollama's sleep survival is a CODE READING (30s stall watchdog, `try--` so
+    stalls never consume the retry budget). Not tested on real hardware. Test it.
+  - Whether ComfyUI-Manager's `download_url` can be reliably rebound at runtime
+    from a custom node depends on import ordering. If it holds, it is the
+    cheapest integration in the whole survey. Spike it.
+  - Lemonade #2283: whether HF_HOME/HF_HUB_CACHE genuinely fail on Linux or are
+    merely overridden by installed config. Reproduce before believing either.
+  - When Lemonade migrated from Python to C++, and whether a legacy Python
+    package is still published for older installs. Not investigated.
+  - ComfyUI's app/assets subsystem (blake3 hashes, unique hash index, many
+    AssetReference paths -> one Asset) is converging independently on the same
+    hash-keyed shape our shared store needs. Hashing is opt-in today
+    (compute_hashes defaults False, commented "slow for large files"), so it is
+    not yet a store. It is the seam to ALIGN WITH rather than fight, but the API
+    is new and unversioned. Watch it.

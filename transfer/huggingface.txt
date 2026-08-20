@@ -1,0 +1,162 @@
+HUGGINGFACE DOWNLOAD PATH (huggingface_hub / hf_xet / hf_transfer)
+==================================================================
+
+CATEGORY: vendor client for the dominant model host
+LICENSE: Apache-2.0 across the stack — huggingface_hub (Python), hf_transfer
+(Rust), xet-core / hf-xet (Rust). All green, all linkable.
+ADDED: 2026-08-18 — transfer-implementation survey for the download abstraction.
+
+WHAT IT IS — AND WHAT IT NOW IS NOT
+  Three generations, and two of them are already dead:
+  1. Plain HTTPS GET against the Hub, with the CDN redirect, into a content-
+     addressed local cache (~/.cache/huggingface/hub, blobs/ keyed by ETag with
+     symlinked snapshots). Historically resumable via `resume_download`.
+  2. hf_transfer — a Rust accelerator, Apache-2.0, for saturating >500 MB/s links
+     that Python could not. Explicitly a power-user tool, explicitly with no
+     progress bars.
+  3. hf_xet / xet-core — chunk-level deduplicating CAS. This is the default now.
+  In huggingface_hub v1.0, generations 1 and 2 were removed as options:
+    "Now that all repositories on the Hub are Xet-enabled and that hf_xet is the
+    default way to download/upload files, we've removed support for the
+    hf_transfer optional package. The HF_HUB_ENABLE_HF_TRANSFER environment
+    variable is therefore ignored. Use HF_XET_HIGH_PERFORMANCE instead."
+  and, in the same migration guide:
+    "resume_download, force_filename, and local_dir_use_symlinks parameters have
+    been removed from hf_hub_download and snapshot_download."
+  (huggingface.co/docs/huggingface_hub/concepts/migration, read 2026-08-18;
+  docs served from the v1.27.0 tree, latest release v1.28.0 dated 2026-08-18.)
+  HF_HUB_DISABLE_XET=1 still forces the plain-HTTP path and is the community's
+  standard workaround.
+
+  READ THAT AGAIN: the most widely used model downloader on earth removed its
+  resume parameter in its 1.0 release. This is the single most useful data point
+  in this survey.
+
+SURVIVAL
+  Process exits:  NO. It is a Python function call.
+  Reboot:         NO.
+  Sleep/hibernate: NO — and this is not theoretical. Issue #4196 "No resuming of
+    downloads" (huggingface_hub, opened 2026-05-06, read 2026-08-18) reports a
+    16.9 GB download that had reached 3.46 GB restarting from ~404 MB after a
+    system suspend. No maintainer commitment to resume appears on that issue as
+    of reading.
+  Network loss:   partial. There is HTTP retry inside the client, but issue #4349
+    reports `hf download` "routinely crashes with HF_HUB_DISABLE_XET (no retry)".
+  What DOES carry over between runs is the local chunk cache: because Xet is
+  content-addressed, a re-run will not re-fetch chunks it already holds. That is
+  deduplication doing an impression of resume. It is not the same thing — it
+  depends on what the client chose to persist, not on a recorded transfer state,
+  and #4196 is the evidence that it does not save you in practice.
+
+UNIT OF WORK
+  A CALL: hf_hub_download() or snapshot_download(). No job, no id, no handle, no
+  queue, nothing another process can query, adopt, pause or resume. The only
+  cross-process artefact is the cache directory itself, and the cache is keyed by
+  repo/revision/ETag, not by "a transfer that is in progress".
+
+RESUME
+  Nominally chunk-level via CAS dedup; in practice, per the issue tracker, not
+  reliable. The byte-range resume that generation 1 had was removed as an API
+  surface in v1.0. UNVERIFIED whether the internal HTTP layer still range-resumes
+  a single file within one call — the parameter is gone, the behaviour is not
+  documented either way. Must be measured, not assumed.
+
+INTEGRITY
+  This is Xet's one genuine advantage. Files are chunked with content-defined
+  chunking using GearHash, averaging ~64 KiB per chunk; each chunk is hashed with
+  a Blake3-based MerkleHash; chunks are aggregated into "xorbs" for storage and
+  transfer. The file identity is therefore a Merkle hash over its chunks, and the
+  reassembled file is verifiable against it by construction.
+  (huggingface.co/docs/xet/en/chunking and .../deduplication, read 2026-08-18)
+  UNVERIFIED: whether hf_xet actually fails loudly on a whole-file hash mismatch,
+  or only uses hashes for dedup lookup. This matters and is testable.
+  The legacy HTTP path used the ETag as cache identity, not as a verified digest.
+
+PROGRESS REPORTING
+  tqdm bars in the calling Python process, and the `logging` module. That is all.
+  hf_transfer had a callback and hf_transfer is gone. No RPC, no file, no IPC.
+  If your process is not the one downloading, you cannot see progress.
+
+DELEGATION / HANDOFF
+  NONE. There is no job object to hand anywhere. The only delegation primitive
+  the Hub offers is the URL itself.
+
+PLATFORM AND BINDINGS
+  Python 3.9+ (v1.0 dropped 3.8), wheels for Linux/macOS/Windows. Rust crates on
+  crates.io: hf-xet, xet-client, xet-data, xet-core-structures, xet-runtime. A
+  git-xet CLI (Git-LFS-compatible). Python bindings are PyO3/maturin over the
+  Rust core. No Go client of any kind.
+
+DRIVING IT FROM GO
+  Three routes, in increasing order of work:
+  1. Reimplement the Hub HTTP API. The resolve endpoint 302s to a CDN URL you can
+     Range-GET with net/http. No CGO, no dependency, and you get the resume and
+     verification the official client just removed. This is what Go-based model
+     tooling generally does, and it is the recommended route.
+  2. FFI to xet-core. It is Apache-2.0 Rust; build a cdylib and cgo to it, or
+     port the chunking. You get dedup and Merkle verification and you take on a
+     Rust toolchain in your build and a young, actively-broken protocol.
+  3. Subprocess `hf download`. Inherits every failure below and gives you tqdm on
+     a pipe. Not recommended.
+  Note that route 1 is only viable while the Hub still serves plain HTTPS for
+  Xet-backed repos. HF_HUB_DISABLE_XET=1 currently proves it does. That
+  guarantee is the project's single biggest external dependency risk and is
+  UNVERIFIED as a long-term commitment.
+
+STINKS (all from the public issue trackers, read 2026-08-18)
+  - No resume. huggingface_hub #4196, opened 2026-05-06, is titled exactly that.
+  - Downloads stall dead. xet-core #789 (2026-04): starts at 80–400 MB/s then
+    stops completely after 16–200 MB, with out-of-order chunk delivery and TCP
+    congestion collapse offered as the suspected cause. xet-core #850, same
+    symptom. xet-core #869 (2026-06): the facebook/sam3.1 checkpoint stalls
+    indefinitely with hf-xet installed and completes fine when it is uninstalled.
+  - xet-core #483 "Still can't download models".
+  - huggingface_hub #3036 (2025-04): "Data processing error: CAS service error"
+    and incomplete-body errors on a slow residential connection.
+  - huggingface_hub #4349: `hf download` crashes with HF_HUB_DISABLE_XET, no
+    retry.
+  - The recurring community fix for all of the above is to turn the flagship
+    feature off: HF_HUB_DISABLE_XET=1.
+  - Churn: requests→httpx, hf_transfer removed, Repository class removed,
+    huggingface-cli removed, cache commands rewritten, resume_download removed —
+    all in one major version. Anything wrapping this client is wrapping a moving
+    target.
+
+DONE GREAT
+  - Apache-2.0 throughout, including the Rust core. No licence problem anywhere.
+  - Chunk-level deduplication is genuinely the right idea for model weights,
+    where successive revisions of a 40 GB checkpoint differ in a small fraction
+    of bytes. Nothing else in this survey does that for HTTP.
+  - Content-addressed identity means integrity is available for free, if the
+    client chooses to enforce it.
+  - The local cache layout is content-addressed and shareable.
+
+ABSTRACTION ANGLE
+  This is the strongest evidence in the survey that the problem is unsolved by
+  the incumbent. The dominant client for the exact payload class — 0.4–40 GB
+  model weights — shipped a 1.0 that has no resume parameter, no job identity, no
+  out-of-process progress, and an open stall bug against a flagship checkpoint.
+  For the abstraction, HuggingFace is a SOURCE, not an IMPLEMENTATION: take the
+  URL scheme, the CDN redirect, the ETag/Merkle digest and the cache layout, and
+  transfer the bytes with your own binding. The one thing worth genuinely
+  adopting rather than reimplementing is content-defined chunking as the resume
+  and dedup unit, because that is what makes a 40 GB revision update cheap. Note
+  it is also the one design decision a `download(url) -> bytes` API can never
+  express.
+
+SOURCE PROVENANCE
+  Primary, all read 2026-08-18:
+  https://huggingface.co/docs/huggingface_hub/concepts/migration
+  https://github.com/huggingface/huggingface_hub/releases
+  https://github.com/huggingface/huggingface_hub/issues/4196
+  https://github.com/huggingface/xet-core (licence, crates, dedup claim)
+  https://huggingface.co/docs/xet/en/chunking
+  https://huggingface.co/docs/xet/en/deduplication
+  https://github.com/huggingface/hf_transfer
+  Issue references #789, #850, #869, #483, #3036, #4349 located via search and
+  their titles/dates read from search results — the issue bodies themselves were
+  not all opened individually. Treat the specific numbers as reliable and the
+  root-cause attributions as reported, not confirmed.
+  Not verified by us: whether hf_xet enforces the file-level Merkle hash, whether
+  the internal HTTP path still range-resumes after v1.0, and how long plain-HTTPS
+  access to Xet-backed repos will remain available.

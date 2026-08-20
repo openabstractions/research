@@ -1,0 +1,133 @@
+CURL / LIBCURL
+==============
+
+CATEGORY: transfer library and CLI — the universal fallback
+LICENSE: "the curl license", SPDX identifier `curl`. Permissive, "inspired by
+MIT/X, but not identical". NOT copyleft. Green for any use, including linking.
+(curl.se/docs/copyright.html, read 2026-08-18)
+ADDED: 2026-08-18 — transfer-implementation survey for the download abstraction.
+
+WHAT IT IS
+  The default answer to "move bytes over a URL". libcurl is the C library; curl
+  is the CLI wrapper. Ubiquitous, extremely well maintained, and — importantly
+  for this survey — deliberately stateless. It transfers; it does not manage.
+
+SURVIVAL
+  Process exits:  NO. Nothing survives. There is no control file, no session
+    file, no queue, no daemon. The only artefact is the partially written output
+    file on disk, and curl records nothing about it.
+  Reboot:         NO.
+  Sleep/hibernate: the process is frozen with the machine; on wake the sockets
+    are typically dead. curl will error out or hang until a timeout. There is no
+    documented wake-and-resume behaviour because there is no state machine to
+    resume into.
+  Network loss:   NO, not by itself. curl fails the transfer. `--retry N`,
+    `--retry-all-errors`, `--retry-delay` and `--retry-max-time` give you
+    in-process retry, and combined with `-C -` those retries do resume rather
+    than restart. That is the closest curl gets, and it lasts exactly as long as
+    the process does.
+
+UNIT OF WORK
+  A CALL. `curl_easy_perform()` or one argv invocation. There is no job, no
+  identity, no handle another process can look up. `curl_multi_*` gives you
+  concurrency inside one process; it is still one process's business.
+  This is the fact that makes curl the wrong reference model for the facade and
+  the right one for the lowest tier of it.
+
+RESUME
+  Byte offset only. CLI: `-C -` ("continue at the offset implied by the local
+  file size") or `-C <offset>`. Library: CURLOPT_RESUME_FROM, and you MUST use
+  CURLOPT_RESUME_FROM_LARGE past 2 GB — for 0.4–40 GB payloads the small variant
+  is a bug waiting to happen. (curl.se/libcurl/c/CURLOPT_RESUME_FROM.html, read
+  2026-08-18)
+  Does it verify what it resumed? NO. curl sends Range: bytes=N- and appends
+  whatever comes back. If the remote file was replaced, rotated, or the local
+  partial belongs to a different object, you get a silently corrupt file and exit
+  code 0. Nothing checks ETag or Last-Modified for you unless you wire
+  If-Range/If-Match yourself.
+  No chunk map, so there is no multi-connection resume: curl has no built-in
+  parallel-range fetch of a single file (`--parallel` parallelises across URLs,
+  not within one).
+
+INTEGRITY
+  None. curl has no --checksum. It will happily write a truncated body when a
+  connection closes early without Content-Length and return success. You hash the
+  result yourself, or you do not know.
+
+PROGRESS REPORTING
+  In-process only. CURLOPT_XFERINFOFUNCTION (the modern, curl_off_t-clean
+  replacement for CURLOPT_PROGRESSFUNCTION) is called at frequent intervals with
+  dltotal/dlnow/ultotal/ulnow. CLI gives the progress bar, `--progress-bar`, and
+  `-w '%{size_download} %{speed_download}'` on completion.
+  There is no out-of-process view. If your process is not running, no one knows
+  anything.
+
+DELEGATION / HANDOFF
+  NONE. There is no object to hand over. The only "handoff" available is: agree a
+  byte offset out-of-band and have the next actor pass it to -C. That is exactly
+  the primitive the facade would have to build on top, and it is why curl cannot
+  be the whole answer for the Windows tier.
+
+PLATFORM AND BINDINGS
+  Everything. Every OS this project will ever see. Bindings exist in ~60
+  languages. curl.exe ships in Windows in-box (since Windows 10 1803 era —
+  the exact first build is UNVERIFIED here; on Windows it is built against
+  Schannel, so it uses the Windows certificate store, which is usually what you
+  want).
+
+DRIVING IT FROM GO
+  Three options, and the honest recommendation is "none of them".
+  1. Don't. Go's net/http gives you Range requests, redirects, proxies, TLS,
+     timeouts and an io.Reader you can count bytes off. Everything the curl tier
+     needs is ~200 lines of stdlib with zero dependencies and no CGO. This is
+     what almost every Go download tool does.
+  2. libcurl via CGO. github.com/andelf/go-curl is the known binding; it is old
+     and its maintenance status is best described as dormant (UNVERIFIED — we did
+     not audit commit history). CGO costs you cross-compilation, which for a
+     Windows-targeting Go project is a real tax.
+  3. Subprocess curl.exe. Viable on Windows because it is in-box, and it gives
+     you `-C -` for free. You parse stderr for progress or you poll the output
+     file's size — the latter is more robust.
+  If "console wrapper" in this project means "shell out to a downloader", curl is
+  the right binary to shell out to. If it means "a Go implementation for the
+  console", write it with net/http and skip curl entirely.
+
+STINKS
+  - Silent truncation. Connection closed mid-body with chunked or no
+    Content-Length → short file, exit 0. This is the classic curl download bug
+    and it is a data-integrity issue at 40 GB.
+  - `-C -` onto a stale partial produces a corrupt file with a success exit code.
+  - No integrity, no job, no persistence — three of the four things this project
+    needs.
+  - CURLOPT_RESUME_FROM vs _LARGE is a 2 GB cliff that compiles fine.
+  - The CLI's exit codes and error text are a stable-ish but unstructured API;
+    scraping progress from stderr is fragile.
+
+DONE GREAT
+  - Licence is clean, permissive, and unambiguous.
+  - It is everywhere, it is correct about HTTP, and it handles the protocol
+    edge cases (proxies, auth schemes, redirects, TLS backends, IPv6 happy
+    eyeballs) that a hand-rolled client gets wrong for years.
+  - `-C -` plus `--retry-all-errors` is a two-flag solution that covers most of
+    the flaky-network case.
+  - Zero operational footprint: no daemon, no queue, nothing to corrupt.
+
+ABSTRACTION ANGLE
+  curl is the floor, and the floor is worth having: it defines the minimum
+  capability set (range resume, progress callback, retry) that every binding must
+  provide, and it defines what the facade must add on top of a bare transfer —
+  identity, persistence, verification. Model curl as the implementation that
+  answers "no" to every survival question, and make sure the interface can
+  express that honestly rather than pretending. If the facade cannot represent
+  "this binding cannot survive process exit", it will lie to callers on the tier
+  that most users actually run.
+
+SOURCE PROVENANCE
+  Primary, read 2026-08-18:
+  https://curl.se/docs/copyright.html
+  https://curl.se/libcurl/c/CURLOPT_RESUME_FROM.html
+  https://curl.se/libcurl/c/CURLOPT_XFERINFOFUNCTION.html
+  https://everything.curl.dev/transfers/callbacks/progress.html
+  https://github.com/andelf/go-curl
+  Not verified by us: first Windows build shipping curl.exe, go-curl maintenance
+  status, exact behaviour of Schannel-backed curl.exe with corporate proxies.
