@@ -1,0 +1,54 @@
+gRPC, AND THE PLATFORM-NATIVE CHANNELS
+======================================
+
+CATEGORY: a general RPC framework, and the three OS mechanisms it would sit on
+LICENSE: gRPC is Apache-2.0. *** No copyleft. Green. *** XPC and COM are
+  proprietary OS components — called, never linked, so no contamination either
+  way (same posture as BITS in research/transfer/bits.txt).
+ADDED: 2026-09-05 — IPC survey for the channel layer (SCOPE.md §5).
+
+gRPC OVER LOCAL TRANSPORTS
+  Unix domain sockets work on Linux, macOS and Windows 10 / Server 2019 or
+  later, which makes UDS the single most portable local transport available
+  today. Named pipes are supported on every version of Windows and integrate
+  with Windows security. (learn.microsoft.com, ASP.NET Core gRPC IPC docs)
+
+  THE DECISIVE GAP: gRPC gives you the wire and not the caller.
+  grpc/grpc#15511, "Seeking to get peer credentials {uid,gid} when using grpc
+  over a unix domain socket" — getsockopt() is available but "isn't currently
+  called in the gRPC implementation". In Go you reach under the framework via
+  peer.FromContext. Windows named pipes can impersonate the caller, but that is
+  the pipe's property, not gRPC's.
+
+  So adopting gRPC would leave the identity problem exactly where it is, plus a
+  large dependency and a code generator. It is the wrong shape for a layer whose
+  entire purpose is the part gRPC does not do.
+
+THE NATIVE MECHANISMS, WHICH ARE WHAT A FACADE WOULD FACE
+  Windows — named pipes / RPC / ALPC
+    ImpersonateNamedPipeClient yields the caller's ACCESS TOKEN: the OS's own
+    security principal, the same object it uses for its own checks. ACLs on the
+    pipe give fine-grained control over who may connect at all.
+  macOS — XPC
+    Connection carries an audit token; SecCodeCreateWithXPCMessage is the public
+    route to a code-signing check. The obvious call,
+    xpc_connection_get_audit_token, is NOT public API and was exploitable.
+  Linux — AF_UNIX
+    SO_PEERCRED (kernel-stamped at connect), SO_PEERPIDFD since 6.5, SO_PEERSEC
+    for an LSM label. Filesystem permissions on the socket path.
+
+  Details and sources: research/integration/caller-identity.txt
+
+WHAT THIS MEANS FOR THE LAYER
+  All three natives already provide a channel AND an authoritative principal.
+  None provides portable application identity. A facade over these three is
+  therefore thin — which is the good case — and its whole difficulty is
+  presenting three different STRENGTHS of answer without lying about any of
+  them.
+  That argues for facing the natives directly rather than adopting a framework
+  that abstracts the transport and then hides the very property we need.
+
+SOURCES
+  https://learn.microsoft.com/en-us/aspnet/core/grpc/interprocess
+  https://github.com/grpc/grpc/issues/15511
+  https://github.com/grpc/grpc/issues/13447

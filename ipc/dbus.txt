@@ -1,0 +1,52 @@
+D-BUS
+=====
+
+CATEGORY: message bus and peer-to-peer IPC protocol; the Linux desktop standard
+LICENSE: *** CAUTION. *** libdbus is dual GPLv2+ OR AFL-2.1. Neither choice is
+  comfortable: GPL is strong copyleft, and the AFL patent clause has a long-
+  disputed interaction with LGPL linking (dbus and gtk-devel list threads, 2007
+  and 2009). GDBus, in GLib, is LGPL — weaker, still copyleft for static
+  linking, which is how this project ships C++ (/MT). sd-bus in systemd is
+  LGPL-2.1 (UNVERIFIED by us; check before relying on it) and is Linux-only in
+  practice.
+  There is no permissive implementation of the reference stack. That alone is
+  close to disqualifying for a library we intend adopters to CARRY.
+ADDED: 2026-09-05 — IPC survey for the channel layer (SCOPE.md §5).
+
+WHAT IT IS
+  A protocol plus, usually, a broker. The base protocol is one-to-one; the
+  dbus-daemon adds routing among many applications, names, and activation.
+
+THE DAEMON IS NOT ACTUALLY MANDATORY
+  This is the fact most often got wrong, including by an earlier draft of ours.
+  libdbus provides peer-to-peer connections for direct one-to-one messaging, and
+  peer-to-peer mode works on Windows and macOS. Developers targeting those
+  platforms commonly use it precisely to avoid distributing and managing a
+  background service.
+  So D-Bus passes the carry test on paper. It fails on licence, and on the
+  amount of Linux-desktop assumption that comes with the ecosystem rather than
+  the protocol.
+
+CALLER IDENTITY
+  The strongest ecosystem answer of anything surveyed, and the source of the
+  problem we care about: D-Bus historically identified peers by the pid from
+  SO_PEERCRED, which is racy. SO_PEERPIDFD was proposed by a Wayland developer
+  explicitly to fix that (see research/integration/caller-identity.txt).
+  Its conclusion is the finding we are designing against: even with a race-free
+  pid, there is no standardized way to learn WHAT the process is, so the answer
+  became per-application sockets with metadata attached at creation.
+
+KNOWN LIMITS WORTH RECORDING
+  - Multiplexing through the broker forces all messages into one process, which
+    makes per-connection handling awkward.
+  - No flow control; documented as unusable for streaming or many large objects.
+    Our download layer is exactly "many large objects", so this is not academic.
+  - The broker cannot start until filesystems are mounted, which is why systemd
+    wanted something usable earlier in boot.
+
+SOURCES
+  https://en.wikipedia.org/wiki/D-Bus
+  https://dbus.freedesktop.org/doc/dbus-specification.html
+  https://lists.freedesktop.org/archives/dbus/2009-April/011244.html
+  https://blog.ometer.com/2007/07/17/gpl-afl/
+  https://lists.freedesktop.org/pipermail/dbus/2024-March/018395.html

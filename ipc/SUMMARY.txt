@@ -1,0 +1,81 @@
+LOCAL IPC / CHANNEL SURVEY — SUMMARY
+====================================
+
+SCOPE: prior art for a channel layer whose two ends know each other, established
+once (SCOPE.md §5, item 3). The question it was run to settle: is the layer
+IDENTITY-THEN-POLICY ("who is calling, and may they") or CAPABILITY-BASED ("the
+reference you hold is your permission")? Those choose different wire formats, so
+it cannot be deferred.
+ADDED: 2026-09-05. Facts sourced in the individual profiles.
+
+TABLE 1 — THE THREE THINGS THAT DECIDE IT
+
+                  AUTHORITY MODEL   CARRIABLE?        LICENCE       IDENTITY OF
+                                    (SCOPE.md §3)                   THE CALLER
+  Cap'n Proto     capability        YES, library      MIT     green  n/a by design
+  varlink         none (transport   YES, library      spec;    check  none of its own
+                  decides)                            per binding
+  D-Bus           identity + policy yes, peer-to-peer GPLv2+/AFL-2.1  best ecosystem
+                                    mode, no daemon   *** red ***     answer
+  gRPC            none              YES, library      Apache-2.0 green NOT PLUMBED
+                                                                      (grpc#15511)
+  XPC (macOS)     identity          n/a, is the OS    proprietary     code signature
+  COM/pipes (Win) identity          n/a, is the OS    proprietary     access token
+  AF_UNIX (Linux) identity          n/a, is the OS    n/a             uid authoritative,
+                                                                      app: no answer
+
+TABLE 2 — WHAT EACH WOULD COST US
+
+  Cap'n Proto   RPC exists in 9 languages, serialization-only in 8 more.
+                JAVA IS SERIALIZATION-ONLY. C is serialization-only and
+                unmaintained. Windows state UNVERIFIED — test before choosing.
+  varlink       Trivial to implement per language; three independent
+                implementations conformance-tested byte for byte is a thing this
+                project already does and has harnesses for. Linux-shaped
+                ecosystem; Windows/macOS support UNVERIFIED.
+  D-Bus         No permissive implementation of the reference stack. Disqualifying
+                for something adopters CARRY, before any technical merit.
+  gRPC          Large dependency and a code generator, in exchange for the half
+                of the problem we do not have.
+
+THE FINDING
+  1. THE NATIVES ALREADY DO MOST OF IT. Windows, macOS and Linux each provide a
+     local channel AND an authoritative principal for its peer. A facade over
+     the three is thin. Its entire difficulty is presenting three different
+     STRENGTHS of answer without lying about any — see caller-identity.txt.
+     This argues for facing the natives, not adopting a framework that
+     abstracts the transport and hides the property we need.
+
+  2. THE QUESTION MAY BE THE WRONG ONE. Everything except Cap'n Proto helps a
+     service ask "who is calling". Cap'n Proto removes the question: holding the
+     reference IS the permission.
+     And the industry has already drifted there without naming it. Wayland and
+     D-Bus, having found peer interrogation unportable, now hand each
+     application instance its own socket with metadata attached at creation.
+     That construction is a capability.
+     If we follow it deliberately, most of a rights-and-ownership layer does not
+     need to be built. That is a better outcome than building it well.
+
+  3. WHAT SURVIVES UNDER EITHER MODEL IS BOOTSTRAP. Somebody still decides which
+     capability an application is handed the FIRST time. Platform identity
+     re-enters exactly there, once, at channel creation — which is also where
+     SCOPE.md concluded identity should be bound. The two answers agree.
+
+RECOMMENDATION
+  Design the channel as capability-passing over the platform-native transports,
+  with platform identity used ONLY at bootstrap. Do not adopt D-Bus (licence) or
+  gRPC (wrong half). Cap'n Proto is the closest existing thing and is worth
+  prototyping against; varlink is the fallback if its multi-language RPC story
+  proves too thin, since a small JSON protocol is something this project has
+  already shown it can implement three times and conformance-test.
+
+  NOT A DECISION TO TAKE YET. SCOPE.md §4: no new layer starts until an existing
+  layer has an adopter who is not us. This survey exists so that when that
+  happens, the shape is already argued rather than improvised.
+
+OPEN, AND WORTH RESOLVING BEFORE ANY CODE
+  - Cap'n Proto on Windows with MSVC: current state UNVERIFIED.
+  - varlink on Windows and macOS: implementations UNVERIFIED.
+  - sd-bus and sd-varlink licences: assumed LGPL-2.1, UNVERIFIED.
+  - Whether a capability model can express "revoke" well enough for the
+    licensing case that motivated the rights idea in the first place.
