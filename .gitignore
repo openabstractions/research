@@ -1,0 +1,9 @@
+# Python (in case tooling is added to process these surveys)
+__pycache__/
+*.pyc
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
