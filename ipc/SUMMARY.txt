@@ -73,9 +73,44 @@ RECOMMENDATION
   layer has an adopter who is not us. This survey exists so that when that
   happens, the shape is already argued rather than improvised.
 
+THE MOTIVATING SCENARIO, WHICH IS ALSO THE HARDEST TEST
+  Installers ask for admin and then may do anything. That is ambient authority:
+  the program acts with all the power of whoever ran it, scoped to nothing. It
+  is the exact condition capability security was invented against, and it is the
+  strongest argument in this file for the capability model.
+
+  Note the asymmetry, because it says where the gap is. The industry fixed
+  RUNTIME permissions — iOS 4 prompts (2010), iOS 6's Privacy pane (2012),
+  Android 6.0 runtime permissions (2015), macOS TCC, polkit actions — and left
+  INSTALL-TIME elevation alone. All of those predate GDPR (2018) by years; they
+  came from vendors under pressure, not from regulation, which means the change
+  is reachable without one.
+  The reason install-time lagged is real and not laziness: "may use your camera"
+  is evaluable by a person and "may write under /usr/lib" is not. Runtime
+  permissions attach to scenarios; install actions attach to paths.
+  The partial answer that exists is to make installation DECLARATIVE rather than
+  executable — MSIX declared capabilities, Flatpak's permission manifest, polkit
+  per-action policy, .deb/.rpm letting the manager rather than the package do
+  the writing. Four platforms, four vocabularies, no common answer. The same
+  fragmentation as caller-identity.txt found, one level up.
+
+  WHAT THIS DEMANDS OF US, and it is where capabilities are weakest:
+  - REVOCATION. "Grant a few, change your mind later" is the whole point of the
+    scenario. Capabilities are excellent at unforgeable grant and historically
+    poor at withdrawal; this needs an answer, not a hope.
+  - LEGIBILITY. A person must be able to see what an application currently
+    holds. An unforgeable reference nobody can enumerate is not auditable.
+  - NO BLANKET ESCAPE HATCH BY DEFAULT. Vista's UAC is the case study: the
+    escape hatch did not absorb the impatient, it became the default path and
+    people disabled UAC entirely. Design constraint that follows: the granular
+    path must be EASIER than the blanket one, not merely available. If three
+    specific grants cost more clicks than one total grant, the granular model is
+    decorative.
+
 OPEN, AND WORTH RESOLVING BEFORE ANY CODE
   - Cap'n Proto on Windows with MSVC: current state UNVERIFIED.
   - varlink on Windows and macOS: implementations UNVERIFIED.
   - sd-bus and sd-varlink licences: assumed LGPL-2.1, UNVERIFIED.
-  - Whether a capability model can express "revoke" well enough for the
-    licensing case that motivated the rights idea in the first place.
+  - Revocation and enumeration under a capability model — see above. This is now
+    a requirement from the motivating scenario, not a caveat, and it is the one
+    thing that could sink the recommendation.
