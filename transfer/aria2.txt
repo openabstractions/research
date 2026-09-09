@@ -1,0 +1,141 @@
+ARIA2
+=====
+
+CATEGORY: multi-connection download utility with a JSON-RPC control plane
+LICENSE: GPL-2.0-or-later, with an OpenSSL linking exception (LICENSE.OpenSSL in
+the repo). *** COPYLEFT. HARD NO for linking. *** Subprocess or RPC only, and
+even then, shipping the binary in your installer carries GPLv2 source-offer
+obligations for that binary.
+ADDED: 2026-08-18 — transfer-implementation survey for the download abstraction.
+
+WHAT IT IS
+  A command-line download utility that speaks HTTP/HTTPS, FTP, SFTP, BitTorrent
+  and Metalink, splits a single file across multiple connections and multiple
+  sources, and — the part that matters here — can run as a daemon exposing a
+  JSON-RPC / XML-RPC control interface with per-download identity.
+
+SURVIVAL
+  Process exits:  NO. aria2 is a process; kill it and the transfer stops. What
+    survives is on-disk state, in two pieces:
+      - a `.aria2` control file written next to the target (e.g. model.gguf.aria2)
+        holding the per-piece bitfield. Written every --auto-save-interval,
+        default 60 seconds. Deleted on completion. Lose it and you lose
+        piece-level resume.
+      - an optional session file via --save-session, restorable with
+        --input-file, which carries the download list and its options.
+  Reboot / sleep / hibernate: NO automatic anything. Nothing relaunches aria2.
+    You supply the supervisor (Windows service wrapper, scheduled task, systemd).
+    On wake, an already-running aria2 retries dead sockets on its own.
+  Network loss:   YES, within the running process. It retries per its retry/
+    timeout options and rebuilds connections.
+  Net: aria2 gives you resumable state, not an unattended transfer. The
+  "survives" property has to be manufactured by whatever runs it.
+
+UNIT OF WORK
+  A download, identified by a GID: "aria2 identifies each download by the ID
+  called GID. The GID must be hex string of 16 characters ... The GID all 0 is
+  reserved and must not be used." (aria2c manual, RPC interface section, read
+  2026-08-18). GIDs are generated per download but can be pinned with --gid,
+  which the manual explicitly calls out as useful when restoring sessions. The
+  session file preserves GIDs, with documented caveats for downloads that go
+  through metadata (magnet → torrent, metalink): in those cases it is the
+  metadata download's GID that is saved.
+  The daemon (-D --enable-rpc, default --rpc-listen-port 6800, --rpc-secret
+  TOKEN) is a shared job queue: any process on the box can addUri into it and any
+  process can query it. That is a real control plane, unlike curl.
+
+RESUME
+  Byte-range, piece-level, and multi-connection-aware — the bitfield in the
+  `.aria2` file means a 12-way split resumes correctly, not just "append from
+  offset N". `--continue` also resumes files that some other tool started
+  sequentially (browser, wget), because in that case it can assume a contiguous
+  prefix. Without a control file, resume degrades to that contiguous assumption
+  or a full restart (--allow-overwrite).
+  Does it verify what it resumed? Only if you gave it something to verify
+  against — see INTEGRITY. By default, no.
+
+INTEGRITY
+  Optional and caller-supplied for HTTP/FTP: `--checksum=TYPE=DIGEST`, e.g.
+  `--checksum=sha-1=0192ba11326fe2298c8cb4de616f4d4140213838`. Mandatory and
+  automatic for BitTorrent and Metalink, where piece hashes come with the
+  metadata. `--check-integrity` re-hashes against piece hashes and re-downloads
+  only the damaged pieces — genuinely useful, but again only available when a
+  hash source exists.
+  So: aria2 will verify if you hand it a digest. It will not invent one.
+
+PROGRESS REPORTING
+  - JSON-RPC / XML-RPC polling: aria2.tellStatus(gid) returns completedLength,
+    totalLength, downloadSpeed, files[], status, errorCode. Plus tellActive /
+    tellWaiting / tellStopped for the queue.
+  - JSON-RPC over WebSocket push notifications: aria2.onDownloadStart,
+    onDownloadPause, onDownloadStop, onDownloadComplete, onDownloadError.
+    Event-driven, no polling loop.
+  - Console output / --summary-interval when run in the foreground.
+  This is the best structured progress interface in the survey. It is also the
+  only one designed to be consumed by a different program.
+
+DELEGATION / HANDOFF
+  Partially. Another program CAN hand aria2 a job (aria2.addUri over RPC), query
+  it, pause it, unpause it and remove it — so a long-lived aria2 daemon can act
+  as the "system service" tier. What it cannot do is let a second aria2 process
+  take over a live transfer; handoff is done by stopping, keeping the `.aria2`
+  control file, and re-adding elsewhere. There is no ownership model and no
+  cross-user story.
+
+PLATFORM AND BINDINGS
+  Linux, macOS, Windows (MinGW cross-builds), Android (NDK), BSD, Raspberry Pi.
+  No official language bindings — the interface is the RPC, and clients exist in
+  most languages (aria2p for Python, WebUI-Aria2 / AriaNg for the browser).
+
+DRIVING IT FROM GO
+  Subprocess + JSON-RPC over HTTP POST or WebSocket. No CGO, no linking, so the
+  GPL does not reach your Go code — but you are shipping and invoking a GPLv2
+  binary, which is a distribution question for legal, not an engineering one.
+  The JSON-RPC client is ~150 lines hand-rolled; third-party Go clients exist
+  (e.g. github.com/zyxar/argo) but their licences are UNVERIFIED by us.
+  Windows packaging is the friction: you must vendor a community-built aria2c.exe
+  and its DLLs, and keep them updated yourself.
+
+STINKS
+  - GPL-2.0. This is the disqualifying fact for anything but arms-length use.
+  - Release cadence has effectively stopped. 1.37.0 is the current release. The
+    date GitHub's releases page showed when read 2026-08-18 was 2024-11-15, which
+    conflicts with the commonly cited 2023-06-27 for the same tag — treat the
+    exact date as UNVERIFIED. Either reading means no new minor release in
+    roughly two years. Windows builds in particular lag.
+  - Aggressive defaults get you banned. -x16 -s16 against HuggingFace/CDN
+    endpoints is a well-known way to earn 429s or a block. The tool's headline
+    feature is the thing you have to turn down.
+  - Auth and redirects are manual. Bearer tokens go in --header, and following a
+    signed redirect to a CDN with the auth header intact is a footgun.
+  - Losing the `.aria2` file (crash between saves, tmp cleaner, antivirus) silently
+    downgrades a 40 GB resume to a 40 GB restart.
+  - --enable-rpc without --rpc-secret is a remote write-anywhere primitive on
+    localhost, since RPC callers can set `dir`. Do not ship that by accident.
+  - "File already exists" / --allow-overwrite / --auto-file-renaming interactions
+    are a perennial source of confused bug reports.
+
+DONE GREAT
+  - The GID + RPC model is the closest thing in userspace to BITS' job identity,
+    and it is the only cross-process control plane here that is not Windows-only.
+  - Piece-level resume that survives a multi-connection split correctly.
+  - --check-integrity repairing only damaged pieces is exactly right for 40 GB.
+  - One tool covering HTTP and BitTorrent behind the same GID means the magnet
+    case and the URL case share a binding.
+
+ABSTRACTION ANGLE
+  aria2 is the shape to steal and the code to avoid. Its GID + tellStatus +
+  notification model is a clean, proven, non-Windows analogue of the BITS job
+  handle, and designing the facade so both fit costs nothing. Adopting the binary
+  costs a GPLv2 obligation and a dependency on a project that has shipped once in
+  two years. If a portable multi-connection downloader is needed, the honest
+  reading is: copy the interface, write the implementation in Go.
+
+SOURCE PROVENANCE
+  Primary, read 2026-08-18:
+  https://aria2.github.io/manual/en/html/aria2c.html (options, control file,
+    session, checksum, RPC, GID paragraph)
+  https://github.com/aria2/aria2 (licence, LICENSE.OpenSSL, platforms)
+  https://github.com/aria2/aria2/releases (release history — date conflict noted)
+  Not verified by us: exact 1.37.0 release date, third-party Go client licences,
+  current behaviour against HuggingFace signed URLs.

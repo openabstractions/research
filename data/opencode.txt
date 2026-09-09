@@ -1,0 +1,38 @@
+NAME
+OpenCode
+
+CATEGORY
+Coding agent (open-source, TUI/CLI with client-server model; also desktop app, IDE, web)
+
+OFFICIAL SITE
+https://opencode.ai
+
+GITHUB REPO
+https://github.com/anomalyco/opencode (formerly sst/opencode)
+
+LICENSE
+MIT
+
+WHAT IT DOES
+Open-source, model-agnostic AI coding agent in the terminal; client-server design so many UIs share one agent server.
+
+TECHNICAL ARCHITECTURE
+TypeScript. Client-server: a core server process with pluggable clients (TUI, desktop app, IDE extension, web). Built-in tools: bash, edit, read, write, grep/glob, webfetch, etc. Reads files via tools; terminal via bash tool; LSP servers attach for language-aware code nav. Sandboxing/execution gated by a permissions + policies system. See https://opencode.ai/docs.
+
+CONTEXT / PROJECT ABSTRACTION
+LSP-based code understanding (docs/lsp: attach language servers for diagnostics, go-to-def, symbols) + file search + MCP-provided context. Rules via AGENTS.md (project) and references. Agents (build/plan/general) define context/prompt behavior. Not a heavy embedding index; LSP + search + rules are the context seams. See https://opencode.ai/docs/lsp/ and /docs/rules/.
+
+TOOL CALLING / MCP SUPPORT
+Full MCP client (local stdio + remote HTTP with OAuth dynamic registration), custom tools via config, plugins, SDK, and ACP (Agent Client Protocol) support — can act as both client and server for other agents. Tools are namespaced (server_tool) and can be enabled/disabled globally or per-agent via globs. See https://opencode.ai/docs/mcp-servers/ and /docs/acp/.
+
+PROVIDER SUPPORT
+Any model via provider config: Anthropic, OpenAI, Google, DeepSeek, xAI, OpenRouter, AWS Bedrock, Azure, local (Ollama/LM Studio), any OpenAI-compatible endpoint. Model-agnostic is a core design goal.
+
+KEY FEATURES
+Built-in agents (build, plan read-only, general subagent); client-server multi-surface; TUI; desktop app; LSP; MCP; ACP; plugins; SDK + server; share; permissions/policies; GitHub/GitLab integration; formatters; themes/keybinds/commands; remote config via .well-known/opencode.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+Fast-moving project with frequent config/schema churn (opencode.jsonc); TUI instability/bugs; native Windows rough edges (WSL often recommended); documentation gaps; token cost from MCP servers (GitHub MCP noted to overflow context). 3.9k open issues. https://github.com/anomalyco/opencode/issues
+
+ABSTRACTION HINTS
+Most modular of the group — nearly everything is a clean config/module seam: providers (model abstraction), tools (built-in + MCP + custom), LSP servers (context), agents (prompt/orchestration), permissions/policies (execution gate), plugins + SDK (extension). The client-server split is a strong reference architecture. Best seams to abstract: providers, tools, LSP context, and the permission layer.

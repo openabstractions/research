@@ -1,0 +1,23 @@
+JAN
+===
+
+CATEGORY: local inference engine
+LICENSE: Apache-2.0 (app); engine (Cortex) Apache-2.0; historically AGPL-3.0
+
+WHAT IT IS
+  Open-source privacy-first desktop app running LLMs fully offline with a local OpenAI-compatible server, plus optional remote/cloud model connectivity in the same UI.
+
+ARCHITECTURE / SEAMS
+  Tauri (Rust shell) + React/TS UI talking over local HTTP to a C++ sidecar engine (Nitro -> Cortex.cpp -> menloresearch/llama.cpp; MLX server on Apple Silicon). Engine is a separately-versioned inference platform with its own CLI and OpenAI-compat API. Cloud providers reached via remote adapters.
+
+STINKS
+  - Engine-layer churn (Nitro -> Cortex -> menloresearch) confuses integrators about which API is canonical.
+  - Smaller ecosystem, thinner docs; API server gaps (embeddings/vision) across versions.
+  - License ambiguity history (AGPL -> Apache) worth per-component verification.
+
+DONE GREAT
+  - Clean front/back split: the app is genuinely a thin client over a standalone inference sidecar.
+  - Unified local-vs-cloud behind provider adapters in one UI.
+
+ABSTRACTION ANGLE
+  Owns client + a sliver of hosting, but its real contribution is proving the sidecar pattern: UI/client is decoupled from a versioned inference platform behind an OpenAI-compat boundary. A universal standard would extract exactly that sidecar contract — a stable engine interface a client targets regardless of which C++ engine (llama.cpp/MLX) or cloud provider sits behind it.

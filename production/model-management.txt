@@ -1,0 +1,69 @@
+MODEL MANAGEMENT (artifacts, loading, multi-tenant, adapters)
+==============================================================
+
+1) Model artifact format & safety
+- safetensors: the production standard. Replaces pickle (arbitrary code execution
+  risk). Zero-copy mmap load, lazy load, per-tensor slicing (load a shard onto the
+  GPU that needs it). Has a simple 8-byte header + raw tensor bytes layout.
+  https://huggingface.co/docs/safetensors/index
+- Directory layout: model repo = config.json + tokenizer files + safetensors shards
+  (model-00001-of-00004.safetensors) + generation/quantization config. Sharding lets
+  engines stream one shard per rank.
+- Never load torch .bin / pickle in prod. Only safetensors (or engine-specific
+  compiled artifacts: TRT engines, GGUF for llama.cpp-style local).
+
+2) Versioning & content-addressing
+- Model weights are immutable artifacts; version them by tag/commit/revision (HF Hub
+  uses git revisions + a per-repo commit SHA). Quantized/variant artifacts are
+  distinct revisions.
+- Content addressing (hash the blob => SHA256) enables dedup + integrity + safe
+  caching. A model id + revision + quant scheme + engine should pin the EXACT bytes.
+- Registries: HF Hub / S3 / OCI (Docker/ORAS) registries / model caches (e.g.
+  vLLM/SGLang accept s3:// and hf:// URIs). Artifact provenance = hash + signed
+  manifest (Sigstore/cosign) for supply-chain security.
+
+3) Loading / hot-load / swap
+- Weight loading dominates cold start (tens of GB to hundreds of GB). Optimizations:
+  - mmap + lazy load (load only what the first request touches).
+  - Direct-to-GPU DMA / GDRCopy; skip CPU staging.
+  - Host RAM or NVMe disk cache of the (un)compressed weights so a "warm" start is
+    fast; second instance on the same node avoids re-downloading.
+  - Pre-warming replicas and "model cache aware" scheduling (route to nodes that
+    already have the weights cached).
+- Hot swap: engines can unload/replace models at runtime (vLLM/KServe model caching,
+  multi-model serving). ModelMesh (KServe) packs many models per node and swaps
+  frequently-used ones in/out.
+  https://github.com/kserve/kserve (ModelMesh)
+- Multi-model / multi-tenant on one GPU: schedule multiple SMALL models across MIG
+  slices or time-share one GPU; swap weights in/out on demand.
+
+4) Multi-tenant serving (same engine, many tenants/models)
+- Multi-LoRA batching: ONE base model + many LoRA adapters served simultaneously in a
+  single batch (vLLM Punica, SGLang multi-LoRA). Efficient: base weights loaded once,
+  adapters are tiny deltas applied per-request. This is the modern multi-tenant
+  pattern (per-customer fine-tunes).
+- For distinct base models, run separate replicas (or ModelMesh-style packing).
+- Tenant isolation: separate KV caches, rate limits, and (if needed) separate GPU
+  partitions via MIG.
+
+5) LoRA adapters in production
+- Adapters are ~1-100 MB (vs GB for a full model) => cheap to version, hot-add, and
+  A/B test; enable per-tenant/customer/task customization on shared base weights.
+- Served via multi-LoRA batching on vLLM/SGLang/TRT-LLM; dynamically load/unload
+  adapters without restarting the engine.
+- Storage: adapters also stored as safetensors, content-addressed, often in the same
+  registry with a base-model pointer + revision.
+
+6) Cold-start playbook (what "pro" systems do that local ones don't)
+- Tiered cache: registry -> node NVMe -> host RAM -> GPU VRAM.
+- Prefetch: predict next-needed model (from incoming traffic mix) and pre-pull.
+- Keep idle warm replicas (burn $ to avoid latency); autoscale to a FLOOR > 0.
+- Pipelined load: start serving with shard 0 while streaming remaining shards.
+- Measure and publish cold-start SLO; trade off scale-to-zero vs warm floor.
+
+7) Supply chain / governance (production hygiene)
+- Sign artifacts, pin hashes, SBOM; license + eval-card provenance; red-team/bench
+  gates before promotion (quality regression + safety regression in CI/CD).
+- Environment pinning: CUDA version, engine version, quant config are part of the
+  "model recipe" and must be versioned together (a model + engine mismatch is a
+  common prod incident).

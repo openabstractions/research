@@ -1,0 +1,23 @@
+Flowise
+=========
+
+CATEGORY: workflow/orchestration
+LICENSE: Apache-2.0
+
+WHAT IT IS
+  Low-code drag-and-drop visual builder for LLM apps, agents, and RAG, implemented as a thin wrapper over LangChain.js.
+
+ARCHITECTURE / SEAMS
+  Each canvas node maps 1:1 to a LangChain.js component (models, retrievers, chains, tools, memory) — there is no independent graph engine; it orchestrates LangChain objects. TypeScript monorepo: server (Express), ui (React Flow), components (node integrations). Clean on the surface, shallow underneath: nodes define no runtime semantics of their own.
+
+STINKS
+  - PROJECT ARCHIVED (Aug 13, 2026, read-only) — the single biggest risk; do not build new dependencies on it.
+  - Tight coupling to LangChain.js: bugs/API churn propagate directly; abstraction leaks LangChain concepts into the UI.
+  - Limited custom logic and scaling concerns for complex/high-throughput flows.
+
+DONE GREAT
+  - Fast, accessible visual prototyping of chatflows/agentflows without code.
+  - Clean marketplace of shareable flow templates and custom node/components.
+
+ABSTRACTION ANGLE
+  A case study in "visual layer vs real abstraction layer": the node graph is a 1:1 visual skin over LangChain.js, so it inherits rather than defines its component standard. Its lesson for a universal standard is negative — a real standard must define runtime semantics (typed ports, state, execution), not just wrap a library. The RAG/agent node taxonomy is the only reusable surface.

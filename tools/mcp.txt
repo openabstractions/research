@@ -1,0 +1,25 @@
+MCP
+===
+
+CATEGORY: protocol
+LICENSE: MIT (spec, schema, official SDKs)
+
+WHAT IT IS
+  Open standard connecting AI hosts (Claude, ChatGPT, IDEs) to external tools/data via a minimal JSON-RPC core and three primitives — "USB-C for AI".
+
+ARCHITECTURE / SEAMS
+  Client/server over JSON-RPC 2.0; a host runs clients, each 1:1 to a server. Three server primitives — Tools, Resources (URI-addressable), Prompts — plus client primitives Sampling and Roots. Pluggable transport (stdio or streamable HTTP/SSE) with OAuth 2.1 auth. Source of truth is a TypeScript schema (schema.ts) auto-generated to JSON Schema. Lifecycle: initialize / capability negotiation / notifications. Language-neutral; TS + Python reference SDKs plus many community SDKs.
+
+STINKS
+  - Security under-designed for high-trust execution: tool calls are prompt-injectable, no consent/danger rating, ambient-credential risk.
+  - Transport/auth churn (HTTP+SSE replaced by "streamable HTTP", still-evolving OAuth 2.1) broke early adopters.
+  - Uneven vendor support and primitive implementation inconsistency; drift between TS schema and SDKs.
+  - Governance transition (Anthropic -> foundation) still settling; vendor extensions risk fragmentation.
+
+DONE GREAT
+  - Minimal surface: JSON-RPC core + three tiny primitives, implementable in an afternoon.
+  - N-to-M connector solved every-host-x-every-tool with one interface — pure network effect.
+  - Dominant vendor seeded both hosts and servers simultaneously, plus machine-readable schema as the protocol source of truth.
+
+ABSTRACTION ANGLE
+  The clearest winning-standard recipe in the batch: a tiny, language-agnostic, schema-first core. Won on minimal surface area + a dominant vendor bootstrapping both sides at once. Its risks are the predictable ones: security designed too late and transport/auth churn. The lesson for a universal abstraction: separate the stable core (messages/primitives, governed as a machine-readable schema) from the volatile edge (transport/auth), and nail the security/threat model before adoption, not after.

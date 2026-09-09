@@ -1,0 +1,24 @@
+OpenAI
+=========
+
+CATEGORY: cloud API platform / model provider
+LICENSE: n/a closed
+
+WHAT IT IS
+  Frontier model provider whose API is the de facto reference format; also ships open-weight (gpt-oss) and Realtime audio.
+
+ARCHITECTURE / SEAMS
+  Exposes Responses API (/v1/responses), legacy Chat Completions (/v1/chat/completions), and Realtime (WebSocket/WebRTC/SIP). It sets the standard every competitor copies. MCP is first-class (hosted servers, connectors, secure tunnel, Agents SDK).
+
+STINKS
+  - Three chat APIs (Responses, Chat Completions, deprecated Assistants) + constant model renames force perpetual migration.
+  - High reasoning/output cost with hidden reasoning-token spend.
+  - Fine-tuning platform winding down; aggressive deprecation cadence.
+
+DONE GREAT
+  - Structured Outputs (json_schema + strict) became the schema other providers copied.
+  - Defined the ecosystem's lingua franca: Chat Completions + Responses shapes.
+  - Embraced MCP (hosted servers/tunnel) despite not originating it.
+
+ABSTRACTION ANGLE
+  The format everything converges on. A neutral abstraction must normalize BOTH OpenAI shapes (Chat Completions choices[].message and Responses output items), plus its reasoning_effort/reasoning-token model.

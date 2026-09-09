@@ -1,0 +1,23 @@
+n8n
+=========
+
+CATEGORY: workflow/orchestration
+LICENSE: Sustainable Use License v1.0 (fair-code) + n8n Enterprise License (not OSI-approved)
+
+WHAT IT IS
+  Fair-code workflow automation platform: visual node canvas + custom code, 1500+ integrations, AI agents, self-hosted or cloud.
+
+ARCHITECTURE / SEAMS
+  A directed graph of nodes with typed input/output where data flows as "items" between nodes; nodes are thin adapters to external services. TypeScript monorepo (pnpm+turbo), Express backend, React/Vue editor; worker/queue modes on Redis. The AI layer (AI Agent node, built on LangChain) is bolted on top rather than deeply integrated. Clean uniform graph/data model; monolith in the single large TS monorepo.
+
+STINKS
+  - License controversy: Sustainable Use License forbids offering it as a paid hosted service — a SaaS dealbreaker; enterprise features locked behind `.ee.` files.
+  - Enterprise features (SSO, scaling, external secrets) gated in paid tier.
+  - AI features change/broke fast; workflow/export versioning gaps; performance issues at scale.
+
+DONE GREAT
+  - Uniform node abstraction: everything from a Slack action to an LLM call is a node with typed parameters.
+  - Simple, clean data-flow contract (list of "items" between nodes); strong MCP client AND server support.
+
+ABSTRACTION ANGLE
+  The "everything is a typed node" uniformity is the notable abstraction, but nodes are shallow adapters with business logic embedded per-node. The item-list data-flow contract is clean and portable. For a universal standard, its value is the uniform node/data-flow shape, not depth — its AI layer (LangChain underneath) shows LLM interfaces already standardized elsewhere.

@@ -1,0 +1,58 @@
+NAME
+Ollama
+
+CATEGORY
+Local inference engine / model runner
+
+OFFICIAL SITE
+https://ollama.com
+
+GITHUB REPO
+https://github.com/ollama/ollama
+
+LICENSE
+MIT
+
+WHAT IT DOES
+Turnkey local LLM runtime: one binary + CLI + local REST server that downloads, manages, and runs open models (Llama, Qwen, Gemma, DeepSeek, Mistral, etc.) on CPU/GPU with a focus on developer ergonomics.
+
+TECHNICAL ARCHITECTURE
+- Written in Go (server/CLI, ~ `server/`, `api/`, `cmd/`, `openai/`) that shells out to a compiled C/C++ runner process (`llama/`, `runner/`).
+- Wraps llama.cpp (GGUF inference) and, on Apple Silicon, MLX (via `ml/`, MLX_VERSION pins) as alternate backends. Backend engine version is pinned (LLAMA_CPP_VERSION file).
+- Model files stored as GGUF blobs in a local content-addressed store (`~/.ollama/models`); a Go-based "registry" fetches manifests from ollama.com/library or any OCI-compatible registry.
+- Scheduler + memory manager in Go decide when to load/unload models into a runner process; a single runner subprocess serves requests over an internal RPC/gRPC-style protocol (based on llama.cpp's server API).
+
+API / PROTOCOLS IT SPEAKS
+- Native REST API at http://localhost:11434 (/api/generate, /api/chat, /api/embeddings, /api/create, /api/pull, /api/tags, /api/show, /api/blobs, etc.).
+- OpenAI-compatible endpoints at /v1/chat/completions, /v1/embeddings, /v1/models, /v1/completions.
+- Official SDKs: ollama-python, ollama-js (plus community SDKs for many languages).
+
+KEY FEATURES
+- `ollama run <model>` CLI with interactive chat, `ollama pull/push/create/rm`, Modelfile for customizing prompts/params.
+- Model registry/library (ollama.com/library), import from GGUF or Safetensors via `ollama create`, push to any OCI registry.
+- Built-in /api/chat tools/function-calling; structured outputs via JSON schema; embeddings.
+- Auto GPU detection (CUDA, ROCm/HIP, Metal/MLX), multi-GPU, CPU+GPU hybrid offload.
+- Multi-user/auth (OLLAMA_API_KEY), env-var config, systemd/Docker/Helm deploy, agent launcher integrations (`ollama launch claude`, opencode, etc.).
+
+MODEL DOWNLOAD MECHANISM
+- `ollama pull <name>` resolves tags against a registry (default registry.ollama.ai/ollama.com/library); downloads GGUF blobs + manifests with resume and checksums. Also pulls from Hugging Face (`hf.co/...`) and arbitrary OCI registries. Formats: GGUF (primary), plus import of Safetensors via `ollama create`. `ollama run` auto-pulls if model is missing.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- Models silently auto-unload after a keep_alive timeout (default 5 min), causing cold-start latency spikes; common complaint in issues/discussions.
+- Historically no built-in auth on the local port (exposed on 0.0.0.0) — now addressed via OLLAMA_API_KEY but default remains open on LAN; a known security concern.
+- Memory management is coarse: quantized models loaded fully into RAM/VRAM; no PagedAttention / continuous batching, so concurrent multi-request throughput and long-context scaling lag behind vLLM (frequent "high throughput" and "many concurrent requests" issues).
+- Cross-compile/wheel and Windows GPU (CUDA) setup friction; early Windows builds had no native installer.
+- Lags upstream llama.cpp on newest quantization formats and kernels between releases.
+
+TOOL CALLING / MCP SUPPORT
+- Function calling / tool_calls supported in /api/chat and the OpenAI-compat /v1/chat/completions (tools param), including streaming tool calls and structured JSON output. Well-supported.
+- MCP: supported — models can be configured with `mcp_servers` (tools loaded from MCP servers at runtime) and the org ships mcphost; used widely by agent harnesses (Claude Code, OpenCode, Cline, etc.).
+
+MULTIMODAL SUPPORT
+- Text + vision (LLaVA, LLaMA-Vision, Qwen-VL, Gemma3 vision, etc.) via image input in /api/chat. Embeddings supported. No native audio/TTS/image-gen in the core (delegated to community; some via models). Primary focus is text + vision.
+
+RESOURCE MANAGEMENT
+- Loads full model into memory on demand; unloads after keep_alive idle timeout (configurable, `keep_alive=0` to pin). No layer-level unloading. Queues concurrent requests per model; multiple different models can be resident simultaneously up to memory limits. VRAM/RAM sized by quantization choice; CPU offload via llama.cpp `num_gpu`. Env vars: OLLAMA_NUM_PARALLEL, OLLAMA_MAX_LOADED_MODELS, OLLAMA_KEEP_ALIVE, OLLAMA_HOST/PORT. No built-in cross-app coordination (other apps must poll the API or use keep_alive).
+
+ABSTRACTION HINTS
+- Clean seams: (1) Go API/scheduler layer vs (2) C/C++ inference runner subprocess (llama.cpp or MLX) speaking an internal RPC — the runner is swappable; (3) model store (content-addressed blobs + manifests) vs (4) registry resolver (Ollama registry / HuggingFace / generic OCI). The OpenAI-compat `/v1` layer is a thin adapter over the native API — an obvious re-usable interface boundary. A "provider abstraction" could target either the native API or the OpenAI-compat surface uniformly.

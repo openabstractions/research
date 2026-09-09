@@ -1,0 +1,40 @@
+NAME: LibreChat
+
+CATEGORY: chat UI (self-hosted "enhanced ChatGPT clone" platform)
+
+OFFICIAL SITE: https://librechat.ai
+
+GITHUB REPO: https://github.com/danny-avila/LibreChat
+
+LICENSE: MIT (main repo). RAG API in separate repo https://github.com/danny-avila/rag_api (also MIT).
+
+WHAT IT DOES: Self-hosted AI chat platform unifying OpenAI/Anthropic/Google/AWS/local providers in one ChatGPT-like UI, with agents, MCP, code interpreter, artifacts, and enterprise multi-user auth.
+
+TECHNICAL ARCHITECTURE:
+- Backend: Node.js (Express) in `/api`; frontend: React (Vite) in `/client`; shared logic in `packages/`. Uses MongoDB (conversations/users) + Redis (sessions/caching/streams). Docker Compose is the standard deploy.
+- Custom OpenAI-compatible endpoints supported via `librechat.yaml` config ("custom endpoints") — no proxy needed.
+- RAG split into a separate `rag_api` service (its own repo). Agents/Code Interpreter use a sandboxed container (ClickHouse code-interpreter).
+
+PROVIDERS / MODELS SUPPORTED: OpenAI, Anthropic Claude, Azure OpenAI, Google, Vertex AI, AWS Bedrock, Groq, Ollama, DeepSeek, Mistral, OpenRouter, Cohere, Together, Perplexity, Qwen, MLX, KoboldCPP, and any custom OpenAI-compatible endpoint.
+
+API / PROTOCOLS IT SPEAKS:
+- Consumes: OpenAI API (Chat + Responses API), Anthropic, Google, AWS, plus OpenAI-compatible custom endpoints; MCP client (listed on modelcontextprotocol.io clients page); OpenAPI Actions/Functions.
+- Exposes: HTTP/SSE streaming (with resumable streams), internal API used by the React client.
+
+KEY FEATURES: Agents (no-code builder, marketplace, sharing); Skills (reusable SKILL.md bundles); MCP servers as tools; subagents; Code Interpreter (sandboxed Python/Node/Go/etc.); Artifacts/generative UI (React/HTML/Mermaid); web search; image gen/edit (GPT-Image, DALL-E, Stable Diffusion, Flux); presets + conversation branching/forking; message search; multi-user auth (OAuth2/LDAP/email), admin panel, moderation, token-spend tools; reasoning UI (DeepSeek-R1); import/export; RAG API; Langfuse observability; S3/CloudFront media.
+
+TOOL CALLING / MCP SUPPORT:
+- Strong/robust: function calling + tool_calls, OpenAPI Actions, MCP server integration, Skills, agent tool orchestration, "programmatic tool calling".
+- DeepSeek `reasoning_content` is a recurring pain point with many GitHub issues/PRs: #13366 ("DeepSeek V4 via OpenRouter HTTP 400 reasoning_content must be passed back when tools used"), #13368 (replay DeepSeek reasoning via OpenRouter), #12775 (reasoning not rendered for custom OpenAI-compatible endpoints, hardcoded to deprecated field), #13844 (v0.8.7 breaks reasoning + tool calling for custom endpoints), #13442 (reasoning params unreliable, model-name gating). Mostly fixed over time but clearly a fragile area.
+
+MULTIMODAL SUPPORT: Yes — vision (image input: Claude/GPT/Gemini/Llama-Vision), image generation, TTS/STT, file upload/chat-with-files.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS:
+- reasoning_content / reasoning-replay bugs for DeepSeek + custom OpenAI-compatible endpoints (see issues above); tool-call reliability bugs (#14435 tool calls never executed; #13428 MCP "No content part found in updateContent").
+- MongoDB + Redis dependency is heavier than SQLite-based peers; config complexity (librechat.yaml + many env vars).
+- Agents are powerful but complex; breaking changes documented per release (must read changelog before updating).
+- Some features rely on the separate rag_api repo (fragmentation).
+
+ABSTRACTION HINTS:
+- Clean seams: `/api` (backend) vs `/client` (frontend) vs `packages/` (shared); endpoint/adapter registry per AI provider (add a provider = add adapter + config); Agents/Skills/MCP layered on a tool framework (clear "tool runtime" seam); RAG deliberately extracted to `rag_api` (a model for splitting); `librechat.yaml` as config-driven provider surface.
+- Monolith seams: API server bundles auth, chat, agents, moderation, billing, files; the provider adapter logic is interwoven with streaming/caching.

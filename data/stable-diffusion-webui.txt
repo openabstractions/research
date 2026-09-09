@@ -1,0 +1,58 @@
+NAME
+Stable Diffusion WebUI (AUTOMATIC1111) + Stable Diffusion WebUI Forge (lllyasviel)
+
+CATEGORY
+creative/generation
+
+OFFICIAL SITE
+AUTOMATIC1111: none (GitHub is the home). https://github.com/AUTOMATIC1111/stable-diffusion-webui
+Forge: none (GitHub only). https://github.com/lllyasviel/stable-diffusion-webui-forge
+
+GITHUB REPO
+AUTOMATIC1111: https://github.com/AUTOMATIC1111/stable-diffusion-webui
+Forge: https://github.com/lllyasviel/stable-diffusion-webui-forge
+
+LICENSE
+Both AGPL-3.0. (Forge inherits AGPL-3.0 as a fork of A1111; repo LICENSE.txt = AGPL-3.0.)
+
+WHAT IT DOES
+The original community-standard Gradio web UI for Stable Diffusion image generation: txt2img, img2img, inpainting/outpainting, upscaling, LoRA/embedding training. Forge is a performance-focused fork that keeps the same UI but reworks memory management and inference.
+
+TECHNICAL ARCHITECTURE
+- A1111: Python + Gradio (no node graph — a tabbed, form-based UI). Monolithic `modules/` directory; `scripts/` + `extensions/` are the extension points. Uses k-diffusion and Stability/CompVis diffusion pipelines directly.
+- Forge: same Gradio UI, but adds `backend/` (custom PyTorch UNet implementation) and `modules_forge/`; introduces `UnetPatcher` (runtime monkey-patching of model layers) and a reworked GPU memory manager (offload/swap UNet/weights to CPU or disk; "GPU weight" slider for Flux quantized models).
+- Both single-process, single-user-by-default; no native multi-tenant orchestration.
+
+MODEL FORMAT / ENGINES SUPPORTED
+- Formats: ckpt / safetensors checkpoints, diffusers (partial), VAE, LoRA/LyCORIS, hypernetworks, textual-inversion embeddings.
+- Engines: PyTorch (NVIDIA CUDA, AMD ROCm, Intel OpenVINO path via external wiki).
+- Models: SD1.x, SD2.x, SDXL (+ Alt-Diffusion, Segmind SSD-1B). Forge adds Flux.1 (incl. Bitsandbytes NF4 and GGUF quantization with LoRA support).
+
+API / PROTOCOLS IT SPEAKS
+- Gradio REST API: /sdapi/v1/txt2img, /img2img, /interrogate, /options, /progress, /upscalers, etc. (JSON over HTTP; enables programmatic use).
+- Forge exposes the same Gradio API endpoints ("API endpoints normal, pending improved Flux support").
+- Also internal FastAPI/`--api` endpoint (older) and WebSocket for progress.
+
+KEY FEATURES
+- txt2img + img2img, inpainting/outpainting, color sketch, prompt matrix, XYZ plots, loopback.
+- Extras tab: GFPGAN/CodeFormer face restore, RealESRGAN/ESRGAN/SwinIR upscalers, LDSR.
+- Prompt editing, attention weighting `(text:1.2)`, composable diffusion with `AND`, wildcards `{a|b|c}`.
+- Checkpoint merger, textual inversion + hypernetwork training, LoRA.
+- Extensions ecosystem (Adetailer, ControlNet, AnimateDiff via extension). Forge bundles integrated ControlNet + preprocessors.
+- Forge: UnetPatcher API for runtime model patching (e.g. FreeU built-in), advanced Flux quantization + offload controls.
+
+TOOL CALLING / MCP SUPPORT
+None. No MCP, no agent support, no native tool calling. It is a standalone interactive UI + simple REST API.
+
+MULTIMODAL SUPPORT
+Image generation/editing only in core. No native video/audio generation (video via extensions like AnimateDiff/Deforum). Forge: image (+ Flux), some video via extensions.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- A1111 is effectively unmaintained/stagnant: last tagged release v1.0.0-pre (2023), large PR backlog, topic literally tagged "unstable". The project owner has largely moved on.
+- Dependency pinning pain: requires Python 3.10.x; torch/version conflicts; Gradio upgrades break extensions.
+- Monolithic design makes programmatic reuse awkward; no composition/graph model.
+- Extension breakage is common; many extensions abandoned.
+- Forge: single-author maintenance, slower response, many features "pending implementation"/"broken" (Union ControlNet, Flux ControlNet, OFT LoRAs, Surface touch pressure), and syncs with upstream only every ~90 days.
+
+ABSTRACTION HINTS
+The clearest counterpoint to ComfyUI: a MONOLITH, not a graph. All functionality is hardwired into tabbed Gradio UI; the only abstraction is the "script/extension" hook (a Python class exposing UI + callbacks). No standardized component model — parameters are ad-hoc UI widgets, not typed ports. Forge improves the model-loading/patching layer (UnetPatcher is a clean abstraction) and separates its backend, but inherits the same non-graph UI architecture. This is the "form UI vs node graph" split in miniature.

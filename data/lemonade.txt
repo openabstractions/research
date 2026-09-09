@@ -1,0 +1,98 @@
+NAME
+Lemonade (Lemonade Server / lemonade-sdk)
+
+CATEGORY
+Local inference server / multi-backend model runtime, vendor-sponsored
+
+OFFICIAL SITE
+https://lemonade-server.ai
+
+GITHUB REPO
+https://github.com/lemonade-sdk/lemonade
+
+COMMUNITY
+Discord: https://discord.gg/5xXzkMu8Zk
+
+LICENSE
+Apache 2.0
+
+SPONSOR / MAINTAINERS
+Sponsored by AMD. Maintainers listed in the repo include @amd-pworfolk, @bitgamma,
+@danielholanda, @jeremyfowers, @kenvandine, @Geramy, @ramkrishna2910, @sawansri,
+@siavashhub, @sofiageo, @superm1, @vgodsoe.
+
+WHAT IT DOES
+Serves optimized local LLMs and multimodal models from the user's own GPU and NPU
+behind an OpenAI-compatible HTTP API, with automatic hardware detection choosing an
+appropriate inference backend. Ships a desktop application with a visual Model
+Manager and built-in chat and image interfaces.
+
+HARDWARE TARGETS
+- NPU: XDNA2 (Ryzen AI 300/400 series, Strix Halo)
+- iGPU: AMD gfx1151 (Strix Halo / Ryzen AI MAX+ Pro 395), gfx120X, gfx110X
+- dGPU: AMD Radeon, NVIDIA (Turing and later), Apple Silicon
+- CPU: x86_64
+
+INFERENCE BACKENDS
+- llamacpp — Vulkan, ROCm, CUDA, CPU, Metal, System
+- flm — NPU
+- ryzenai-llm — NPU, Windows
+- vllm — experimental, ROCm (listed with Strix Halo iGPU support)
+- whispercpp (speech-to-text), kokoro (text-to-speech), sd-cpp (image generation)
+
+API / PROTOCOLS IT SPEAKS
+OpenAI-compatible server at http://localhost:13305/v1. Documented as working with
+standard OpenAI client libraries across Python, C++, Java, C#, Node.js, Go, Ruby,
+Rust and PHP.
+
+MODEL FORMATS
+GGUF, ONNX, SafeTensors, FLM.
+
+MODEL DOWNLOAD MECHANISM
+Built-in Model Manager UI for browsing and downloading; `lemonade pull` on the
+command line; sourcing from Hugging Face Hub; custom/local model import.
+UNVERIFIED: whether any digest or checksum is verified on download or on load, and
+whether an incomplete or corrupted file is detected. This is the single most
+decision-relevant unknown about this tool for our purposes and must be measured.
+
+INSTALLATION
+Windows: one-click installer that auto-detects hardware, pulls the appropriate
+backends, and registers Lemonade as a Windows service. Linux: requires ROCm drivers
+to be installed first; Lemonade handles everything above that layer. Marketing and
+third-party guides both emphasise "no manual ROCm flags, no GPU target strings."
+
+REPORTED PERFORMANCE ON STRIX HALO (SECONDARY SOURCES, UNVERIFIED BY US)
+On Ryzen AI MAX+ 395 with 128 GB unified memory (reported as up to ~96 GB usable as
+VRAM): Qwen3.5 35B at ~55 tok/s; GPT-OSS 120B at ~50 tok/s. Dense 70B+ models
+reported to run fully in memory without CPU offload. These are third-party blog
+figures, not measured by us.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- Adoption far behind Ollama (~95k GitHub stars, ~52M monthly downloads for Ollama).
+- Validated third-party integrations are described as a fraction of Ollama's.
+- AMD-centric by design; other vendors supported but not the focus.
+- No documented support for concurrent model residency, context-switch cost, or
+  memory pooling on shared unified memory. Third-party guide coverage of Strix Halo
+  addresses single-model inference only and is silent on contention. Absence of
+  documentation is not proof of absence of behaviour — this must be tested.
+
+RELATIONSHIP TO OUR WORK
+1. It occupies the setup-friction seam our F-track hypothesis assumed was open, on
+   exactly our candidate hardware, backed by the silicon vendor. F3's premise ("how
+   many steps from bare OS to first token") must be re-measured with Lemonade
+   installed rather than against manual community guides.
+2. It does not visibly occupy the memory-arbitration seam. That is now the sharpest
+   remaining candidate wedge and it is what F2 tests.
+3. Apache 2.0 plus NPU capability plus the right audience makes it a stronger
+   integration and fork target than Ollama for the Strix Halo buyer.
+4. If `lemonade pull` does not verify digests, the refusal differentiator found in
+   C3 (llama.cpp silently serving a 16-byte-truncated GGUF) extends to the tool this
+   audience will actually run.
+
+SOURCE PROVENANCE
+Primary: the project's own GitHub README, read 2026-08-16 (maintainers, license,
+backends, hardware targets, port, formats, acquisition, Strix Halo / Ryzen AI MAX+
+Pro 395 references).
+Secondary, treat with caution: third-party comparison and guide articles for adoption
+figures, installation-friction claims, throughput benchmarks, and the observation
+that memory contention is undiscussed.

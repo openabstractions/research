@@ -1,0 +1,24 @@
+Mistral
+=========
+
+CATEGORY: cloud API platform / model provider
+LICENSE: n/a closed
+
+WHAT IT IS
+  Open-weight + commercial model provider, the most "drop-in OpenAI" of the first-party providers, with strong EU/sovereign positioning.
+
+ARCHITECTURE / SEAMS
+  Pure OpenAI-compatible (/v1/chat/completions, embeddings, audio, fim, ocr). Custom MCP connectors (beta) for Vibe/Studio; no A2A push. Open-weight distribution via Hugging Face + regional inference.
+
+STINKS
+  - License ambiguity: "Apache 2.0" (research) vs separate commercial Mistral license (derivatives/production).
+  - High model churn and short lifecycles; weaker flagship mindshare.
+  - Agent API built-in tools priced per-call ($100/1k images) can surprise.
+
+DONE GREAT
+  - Lowest-friction OpenAI drop-in (base_url + key swap, zero message translation).
+  - Prompt caching at -90%, batch, FIM, OCR, audio, moderation, fine-tuning.
+  - Sovereign/regional (EU) inference angle for regulated stacks.
+
+ABSTRACTION ANGLE
+  A pure OpenAI-compatible bet — abstraction layers treat it as an OpenAI clone with no translation. Its extensions (FIM/OCR/audio endpoints, -latest model IDs) are the only departures from parity. Open-weight + regional focus makes it a common EU fallback.

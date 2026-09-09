@@ -1,0 +1,40 @@
+NAME: SillyTavern
+
+CATEGORY: frontend ("LLM frontend for power users"; locally-installed UI, roleplay/character focused)
+
+OFFICIAL SITE: https://sillytavern.app (docs: https://docs.sillytavern.app)
+
+GITHUB REPO: https://github.com/SillyTavern/SillyTavern
+
+LICENSE: AGPL-3.0 (fork of TavernAI 1.2.8, MIT). AGPL is a strong copyleft red flag for any hosted/derived use.
+
+WHAT IT DOES: A local web UI that unifies many LLM backends (KoboldAI, Horde, NovelAI, Ooba, OpenAI, OpenRouter, Claude, Mistral, etc.) for character/roleplay chat, with image gen, TTS, and heavy prompt control.
+
+TECHNICAL ARCHITECTURE:
+- Node.js (Express) server (`server.js`) + a plain-JS (jQuery-based, no React/Vue) single-page client in `public/`. Webpack bundles client. Minimal deps — runs on anything with Node 20+.
+- Local install via npm/start scripts (`Start.bat`, `start.sh`), Docker, or Termux (Android). No DB by default (JSON/`data/` + backups) — chat logs are files.
+- Connects to each backend's native API (KoboldAI, OpenAI, Anthropic, NovelAI, etc.) via adapter modules under `src/endpoints/`.
+
+PROVIDERS / MODELS SUPPORTED: KoboldAI/KoboldCPP, Kobold Horde, NovelAI, Oobabooga text-generation-webui, OpenAI, OpenRouter, Anthropic Claude, Mistral, Google Gemini, Ollama, TabbyAPI, Tabby, and more.
+
+API / PROTOCOLS IT SPEAKS:
+- Consumes: multiple backend-specific APIs (KoboldAI, OpenAI, Anthropic, Google, NovelAI, etc.). MCP client support added. Exposes its own HTTP API for extensions.
+
+KEY FEATURES: Character cards; World Info (lorebooks); multi-character group chats; Visual Novel mode; prompt mastery (samplers, templates, per-backend prompts); image generation via A1111/ComfyUI; TTS/STT; auto-translate; Data Bank (RAG); extensions (3rd-party); mobile-friendly; cloud/TavernAI compatible.
+
+TOOL CALLING / MCP SUPPORT:
+- MCP client support added (SillyTavern can connect to MCP servers as tools). Function calling is otherwise not a first-class pipeline — tools arrive via MCP and extensions rather than native OpenAI tool_calls orchestration.
+- DeepSeek R1 / `reasoning_content`: supported via a "reasoning" toggle in settings; thinking tokens can be shown/hidden per model.
+
+MULTIMODAL SUPPORT: Yes — image input (vision/captions), image generation (A1111/ComfyUI), TTS/STT, audio.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS:
+- AGPL-3.0 license (copyleft) — red flag for commercial reuse/hosting.
+- Roleplay-first, steep learning curve, overwhelming prompt/sampler options; not a general-purpose productivity chat UI.
+- No official multi-user/auth; single-user by design (XSS/security concerns raised historically).
+- Legacy jQuery/plain-JS frontend is hard to refactor; large server.js/extension surface; many extensions break across releases.
+- Reasoning/function-calling support is lighter than LibreChat/Open WebUI.
+
+ABSTRACTION HINTS:
+- Clean seams: `src/endpoints/` backend adapters (one module per backend API) — a clean "provider adapter" boundary; extensions API (plugins) as extensibility seam; World Info/lorebook + prompt manager as a content-injection layer.
+- Monolith seams: server.js is large; prompt templating and chat logic interwoven with UI globals; no framework boundaries in the client.

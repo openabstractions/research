@@ -1,0 +1,65 @@
+CAP'N PROTO RPC
+===============
+
+CATEGORY: capability-based RPC protocol and serialization format
+LICENSE: MIT. *** No copyleft. Green. *** (capnproto.org, read 2026-09-05)
+ADDED: 2026-09-05 — IPC survey for the channel layer (SCOPE.md §5).
+
+WHY IT IS FIRST IN THIS SURVEY
+  It is the only entry that answers our question DIFFERENTLY rather than better.
+  Everything else here helps a service ask "who is calling, and may they". Cap'n
+  Proto removes the question.
+
+THE MODEL
+  Interface references — capabilities — are a first-class type in the protocol.
+  A capability can be passed as a method parameter or embedded in a struct or
+  list. You cannot ask for what you were not handed. There is no identity
+  lookup, no policy table, and no "may this app do that", because holding the
+  reference IS the permission.
+  Based on CapTP, the distributed capability protocol from the E language. It
+  supports three-way vat introductions, join, SturdyRefs and promise pipelining.
+  (capnproto.org/rpc.html, read 2026-09-05)
+
+WHY THIS MATTERS TO US SPECIFICALLY
+  Wayland and D-Bus arrived at "give each application instance its own socket
+  with metadata attached at creation" (research/integration/caller-identity.txt)
+  because interrogating a peer does not work portably. That construction IS a
+  capability — a channel handed out with authority already bound to it — reached
+  by a different road and not named as one.
+  If we follow that line deliberately, the rights-and-ownership layer may not
+  need to exist. That is a better outcome than building it well.
+
+THE COST, WHICH IS REAL
+  RPC is implemented in far fewer languages than serialization, and the split is
+  not where you would guess. From capnproto.org/otherlang.html (read 2026-09-05):
+
+    serialization + RPC   C++ (reference), C#, Erlang, Go, Haskell,
+                          JavaScript (Node only), OCaml, Python, Rust
+    serialization ONLY    Java, C, D, Lua, Nim, Ruby, Scala,
+                          JavaScript (browser)
+
+  Java is serialization-only. C is serialization-only and the original is marked
+  no longer maintained. One JavaScript implementation is marked abandoned. The
+  page states these implementations "have not been reviewed" by the reference
+  maintainer.
+  The page does not mention Windows at all. MSVC support was announced in 0.5
+  (capnproto.org/news/2014-12-15, read 2026-09-05); its CURRENT state on Windows
+  is UNVERIFIED by us and must be tested before this is chosen.
+
+FOR THE CARRY TEST (SCOPE.md §3)
+  Library, not a daemon. Nothing has to be installed or running for two
+  processes to speak it. This is the best carry story in the survey.
+
+WHAT IT DOES NOT GIVE US
+  It does not tell a service which application is calling. That is the point —
+  under this model you never ask. But it means Cap'n Proto is not an alternative
+  to the caller-identity work; it is an argument that most of what that work was
+  FOR can be deleted. The residue that survives is bootstrapping: somebody still
+  has to decide which capability a given application gets handed the first time,
+  and that decision is where platform identity re-enters.
+
+SOURCES
+  https://capnproto.org/rpc.html
+  https://capnproto.org/otherlang.html
+  https://capnproto.org/news/2014-12-15-capnproto-0.5-generics-msvc-java-csharp.html
+  https://en.wikipedia.org/wiki/Cap%27n_Proto

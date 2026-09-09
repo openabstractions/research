@@ -1,0 +1,188 @@
+WINDOWS BITS
+============
+
+CATEGORY: OS-level background transfer service (Windows system component)
+LICENSE: Proprietary, ships with Windows. Not linked into your binary — you call
+it over COM or drive it as a subprocess. No licence contamination either way.
+ADDED: 2026-08-18 — transfer-implementation survey for the download abstraction.
+
+WHAT IT IS
+  Background Intelligent Transfer Service. A Windows service (BITS / qmgr) with a
+  COM API that owns a persistent, on-disk queue of transfer JOBS. Windows Update,
+  ConfigMgr, Intune and Windows Defender all run on it. It is the only thing in
+  this survey that was designed for the exact problem: move a large file in the
+  background, without the requesting process staying alive.
+
+SURVIVAL — THE DECISIVE QUESTION
+  Process exits:  YES. "BITS continues to transfer files after an application
+    exits as long as the user who initiated the transfer remains logged on and a
+    network connection is maintained." (learn.microsoft.com/windows/win32/bits/
+    about-bits, ms.date 2019-07-12, page updated 2025-03-11, read 2026-08-18)
+  Network loss:   YES, transparently. Jobs in QUEUED or TRANSFERRING move to
+    BG_JOB_STATE_TRANSIENT_ERROR with BG_E_NETWORK_DISCONNECTED, and "when a
+    network connection is established, all jobs in a BG_JOB_STATE_TRANSIENT_ERROR
+    state ... are moved to the BG_JOB_STATE_QUEUED state." (bits/
+    users-and-network-connections, read 2026-08-18)
+  User logs off:  SUSPENDED, then auto-resumed. "BITS suspends a job when the
+    owner logs off ... BITS resumes the job when the owner logs back on and a
+    network connection is established." (same page.) Jobs owned by LocalSystem /
+    LocalService / NetworkService are exempt — those accounts "are always logged
+    on; therefore, jobs submitted by a service using these accounts always run."
+  Modern Standby: YES, conditionally. "Starting with the Windows 10 May 2019
+    Update, BITS will transfer files when the machine is in Modern Standby mode
+    and the machine is plugged in." (about-bits)
+  S3 sleep / S4 hibernate: transfer stops (the machine is not running) and the
+    job returns to the queue on wake. UNVERIFIED as an explicit doc statement —
+    Microsoft documents Modern Standby only. Treat classic-sleep resume as
+    strongly implied by the persistent queue, not as a cited guarantee.
+  Reboot: jobs survive. Microsoft does not say this in one sentence, which is
+    worth knowing. What is documented: "Jobs remain in the queue until you call
+    the IBackgroundCopyJob::Complete or IBackgroundCopyJob::Cancel method";
+    default JobInactivityTimeout is 90 days; and "BITS cannot guarantee FIFO
+    processing because of round-robin scheduling, job errors, and service
+    restarts" (life-cycle-of-a-bits-job, read 2026-08-18). The mechanism is a
+    real on-disk queue database at
+    C:\ProgramData\Microsoft\Network\Downloader\qmgr.db (qmgr0.dat/qmgr1.dat on
+    pre-Win10). Reboot survival is universally relied on in the field; the doc
+    support is circumstantial. Verify by test before you build on it.
+
+UNIT OF WORK
+  A JOB, not a call. A job is a container of one or more files with its own
+  properties (priority, retry delay, no-progress timeout, cost policy). It is
+  created suspended and must be Resume()d. It has a GUID that is stable for the
+  life of the job and meaningful outside the creating process:
+  IBackgroundCopyManager::GetJob(guid) and ::EnumJobs from any process, and
+  `Get-BitsTransfer -AllUsers` from an elevated shell. Files within a job are
+  processed FIFO. Priorities: FOREGROUND, HIGH, NORMAL, LOW; higher preempts
+  lower, same-priority jobs round-robin so a 40 GB job cannot starve a 40 MB one.
+  Limits (defaults, group-policy tunable, do not apply to admins/service
+  accounts): MaxJobsPerUser 60, MaxJobsPerMachine 300, MaxFilesPerJob 200,
+  MaxRangesPerFile 500, MaxDownloadTime 90 days, JobInactivityTimeout 90 days.
+  (bits/group-policies, read 2026-08-18)
+
+  THE TRAP: a downloaded file is not yours until you call Complete(). "The
+  transferred files are not available to the client until the application calls
+  the IBackgroundCopyJob::Complete method to transfer ownership of the files from
+  BITS to the user." Cancel() deletes partial AND completed files. Complete()
+  keeps completed ones and deletes partials. An abstraction that models download
+  as "it finished, the file is at path P" is wrong here — there is a mandatory
+  acknowledge step, and forgetting it leaks jobs until the 90-day reaper.
+
+RESUME
+  Byte-range over HTTP/1.1. The server must cooperate: "the HTTP server's Head
+  method must return the file size and its Get method must support the
+  Content-Range and Content-Length headers. As a result, BITS only transfers
+  static file content and generates an error if you try to transfer dynamic
+  content." (bits/http-requirements-for-bits-downloads, read 2026-08-18) Remote
+  names may be HTTP, HTTPS or SMB — so the same job type covers the NAS case.
+  Verification of what it resumed: only size + timestamp. "If the file size or
+  time stamp changes while BITS is transferring the file, BITS restarts the
+  transfer of that file only."
+
+INTEGRITY
+  None. Flatly: "BITS guarantees that the version of the file it transfers is
+  consistent based on the file size and time stamp, not content (BITS does not
+  protect against man-in-the-middle attacks)."
+  (bits/file-transfer-consistency, read 2026-08-18)
+  There IS a hook: IBackgroundCopyFile3::GetTemporaryName gets you the in-flight
+  file, you hash it yourself, then IBackgroundCopyFile3::SetValidationState tells
+  BITS the verdict. Setting FALSE puts an origin-server job into the error state;
+  if the bytes came from a BranchCache peer, BITS re-downloads from origin. That
+  peer-caching path is exactly why you want the hook wired.
+
+PROGRESS REPORTING
+  Three mechanisms, and only one of them survives your process dying:
+  1. Poll IBackgroundCopyJob::GetProgress → BG_JOB_PROGRESS {BytesTotal,
+     BytesTransferred, FilesTotal, FilesTransferred}. Works from any process that
+     can open the job by GUID. This is the one that composes.
+  2. IBackgroundCopyCallback COM callback (JobTransferred / JobError /
+     JobModification). Requires your process to be alive and pumping COM.
+  3. IBackgroundCopyJob2::SetNotifyCmdLine — BITS launches a command line you
+     nominate when the job completes or errors, whether or not you are running.
+     This is the out-of-process completion hook.
+  BytesTotal is BG_SIZE_UNKNOWN until BITS has the size. No WMI provider that I
+  could verify; there is ETW/event-log output. Mark WMI as UNVERIFIED.
+
+DELEGATION / HANDOFF
+  Best in the survey. Any process running as the job owner can open the job by
+  GUID and drive it. An administrator can call IBackgroundCopyJob::TakeOwnership
+  to adopt another user's job. `Get-BitsTransfer -AllUsers` enumerates the
+  machine. So "app hands a job to a system service" is not something you build —
+  it already is the model. The GUID is the handle you persist.
+
+PLATFORM AND BINDINGS
+  Windows only. All currently supported client and server SKUs. Not present on
+  Linux, macOS, or Windows containers in nano/server-core minimal images
+  (UNVERIFIED for containers). UWP apps must use
+  Windows.Networking.BackgroundTransfer instead.
+  Bindings: C/C++ COM, .NET via COM interop (Microsoft.BackgroundIntelligent
+  TransferService.BITSReference or the community SharpBits), PowerShell
+  BitsTransfer module (Start-/Get-/Resume-/Suspend-/Complete-/Remove-
+  BitsTransfer), bitsadmin.exe (deprecated by Microsoft in favour of PowerShell).
+
+DRIVING IT FROM GO
+  No CGO required, but no ready-made client either.
+  - Preferred: github.com/go-ole/go-ole (MIT), which does COM via syscall, not
+    cgo. BITS interfaces are vtable COM derived from IUnknown, not IDispatch, so
+    you write the vtable offsets by hand. Tedious, mechanical, and it is the only
+    route that gives you GetProgress polling and TakeOwnership.
+  - Fallback: subprocess powershell.exe with the BitsTransfer cmdlets, parsing
+    the object output. Loses fine control, keeps job persistence.
+  - Do NOT reach for github.com/vb4life/gobits (MIT) expecting a client — it is a
+    server-side implementation of the BITS *upload* protocol as a Go ServeHTTP
+    handler. Confirmed by reading the repo 2026-08-18.
+  - A tiny C shim + cgo is the third option and buys nothing over go-ole.
+
+STINKS
+  - No content integrity, by design. You must layer a digest yourself.
+  - Jobs wedge in TRANSIENT_ERROR and the field remedy is the blunt
+    `bitsadmin /AllUsers /Reset`, i.e. destroy the whole queue. Widely documented
+    across MSEndpointMgr, Barracuda Campus and vendor KBs (read 2026-08-18).
+  - Queue database corruption: BITS discards a corrupt qmgr.db and creates an
+    empty one. Silent total loss of every queued job.
+  - Jobs owned by NT AUTHORITY accounts are reported as awkward-to-impossible to
+    cancel from an admin shell.
+  - RunAs is not an interactive logon; jobs created under it will not run.
+    Cmdlets used from a non-interactive service context "may not be able to add
+    files to BITS jobs, which can result in a suspended state." Silent stall.
+  - Deliberately slow. It yields bandwidth to foreground traffic and to policy
+    (EnableBandwidthLimits, MaxInternetBandwidth). End users read this as broken.
+    Setting BG_JOB_PRIORITY_FOREGROUND opts out and defeats the point.
+  - Static content only. Anything that needs a signed, expiring, redirecting URL
+    (i.e. most CDN-fronted model hosting) needs the redirect chain resolved by
+    you first, and the resolved URL may expire mid-transfer. This is the single
+    biggest practical risk for HuggingFace/S3-style sources and it is UNTESTED
+    by us.
+  - Files invisible until Complete().
+
+DONE GREAT
+  - Persistence is real, OS-owned, and free. Nothing else here comes close.
+  - Job GUID is a genuine cross-process handle with an ownership-transfer API.
+  - HTTP, HTTPS and SMB in one job model — the NAS case and the internet case are
+    the same object.
+  - Scheduling, priority, cost-aware and power-aware policy already exist.
+  - Zero dependency, zero licence exposure, already installed on every target.
+
+ABSTRACTION ANGLE
+  BITS is the reference semantics for the facade, not merely one binding. Design
+  the interface to what BITS already needs — persistent job handle, mandatory
+  acknowledge step, poll-based progress, ownership transfer, caller-supplied
+  digest — and every other implementation can be made to fit underneath it. Do
+  the reverse and BITS will not fit. The two things it does not give you are
+  content integrity and dynamic/redirecting URLs; both belong in the facade
+  layer, above every binding, not in the Windows one.
+
+SOURCE PROVENANCE
+  Primary, all read 2026-08-18:
+  https://learn.microsoft.com/en-us/windows/win32/bits/about-bits
+  https://learn.microsoft.com/en-us/windows/win32/bits/users-and-network-connections
+  https://learn.microsoft.com/en-us/windows/win32/bits/life-cycle-of-a-bits-job
+  https://learn.microsoft.com/en-us/windows/win32/bits/file-transfer-consistency
+  https://learn.microsoft.com/en-us/windows/win32/bits/http-requirements-for-bits-downloads
+  https://learn.microsoft.com/en-us/windows/win32/bits/group-policies
+  https://learn.microsoft.com/en-us/powershell/module/bitstransfer/
+  https://github.com/vb4life/gobits
+  Secondary, treat with caution: MSEndpointMgr, Barracuda Campus and assorted
+  admin blogs for the queue-reset and stuck-job folklore.
+  Not verified by us: reboot survival, S3/S4 behaviour, WMI exposure, behaviour
+  against expiring redirected CDN URLs, container SKUs.

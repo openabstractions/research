@@ -1,0 +1,23 @@
+LangChain
+=========
+
+CATEGORY: workflow/orchestration
+LICENSE: MIT
+
+WHAT IT IS
+  The most widely used framework for building LLM apps and agents: chain interoperable components (models, retrievers, tools, memory) through standardized interfaces.
+
+ARCHITECTURE / SEAMS
+  Core abstraction is LCEL "Runnables": every component implements invoke/stream/batch and composes with the `|` operator, with Pydantic-typed inputs/outputs. Components split by category (chat/embedding models, retrievers, loaders, tools, memory, output parsers); model integrations in per-provider packages. Stable at the bottom (ChatModel/Embeddings/Retriever/Tool/Runnable interfaces); volatile at the top (chains/agents repeatedly rebuilt, now deferred to LangGraph).
+
+STINKS
+  - Abstraction churn: frequent breaking changes/deprecations; API has shifted repeatedly.
+  - "Over-abstraction" criticism: many layers hide behavior and make debugging harder.
+  - Agent story fragmented (classic agents deprecated in favor of LangGraph); not opinionated enough for production defaults.
+
+DONE GREAT
+  - Standardized BaseChatModel/Embeddings/Retriever/Tool/Runnable interfaces that the whole ecosystem now mimics.
+  - The provider-adapter pattern + LCEL uniform invoke/stream/batch interface is genuinely clean.
+
+ABSTRACTION ANGLE
+  The canonical LLM abstraction layer — the reference for how LLM interfaces got standardized (ChatModel/Tool/Runnable). This is the exact precedent a universal standard should build on: absorb the bottom-layer interfaces (uniform model/tool/runnable contracts) as the model+tool composition seam. Its weakness (volatile higher layers) shows the standard should stay at the interface level, not the orchestration level.

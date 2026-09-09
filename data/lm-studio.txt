@@ -1,0 +1,58 @@
+NAME
+LM Studio (LM Studio Bionic)
+
+CATEGORY
+Local inference engine / model runner (GUI desktop app + local runtime)
+
+OFFICIAL SITE
+https://lmstudio.ai
+
+GITHUB REPO
+Core app: none / closed source. Public SDK repos: https://github.com/lmstudio-ai/lmstudio-js, https://github.com/lmstudio-ai/lmstudio-python, org https://github.com/lmstudio-ai
+
+LICENSE
+Desktop application: proprietary / freeware (closed source), by Element Labs, Inc. SDKs (lmstudio-js, lmstudio-python) and CLI (`lms`) are MIT. No permissive license on the core runtime.
+
+WHAT IT DOES
+Polished desktop app ("ChatGPT-like") to discover, download, chat with, and serve local LLMs entirely offline, aimed at non-experts; doubles as a local OpenAI-compatible server for developers.
+
+TECHNICAL ARCHITECTURE
+- Cross-platform desktop app (Electron shell over a native core) with a React/Next-style UI.
+- Inference runtime is a closed-source engine built on llama.cpp (GGUF, CUDA/Vulkan) and Apple MLX (Apple Silicon) under the hood — the homepage states "Powered by the LM Studio runtime, with MLX and llama.cpp under the hood."
+- Ships an embedded local HTTP server (the "LM Studio local server" / "in-app server") that exposes model loading, chat/completions, and embeddings over a JSON-RPC + OpenAI-compatible REST surface; older versions served OpenAI-compat on http://localhost:1234/v1.
+- Models stored locally in a user data folder (`~/.cache/lm-studio/models`); app talks to Hugging Face for model discovery/download.
+
+API / PROTOCOLS IT SPEAKS
+- OpenAI-compatible REST: /v1/chat/completions, /v1/completions, /v1/embeddings, /v1/models (local server; historically port 1234).
+- Structured/JSON-schema output, function calling (tools) over the OpenAI-compat API.
+- First-party SDKs: @lmstudio/sdk (TypeScript, browser+Node) and lmstudio-python; plus `lms` CLI. SDKs expose model load/unload, context/gpu config, speculative decoding, embeddings — features the OpenAI SDK lacks.
+
+KEY FEATURES
+- Zero-install, single-binary desktop app; in-app model discovery + download from Hugging Face.
+- GPU offload control (CUDA, Vulkan for AMD/Intel), quantization selection, context-length tuning, speculative decoding.
+- Local API server with OpenAI compatibility; multi-model loading, vision models, embeddings.
+- "Bionic" agent for work/code (agentic tasks, real-time local voice transcription) layered on the runtime; cloud features are Zero Data Retention.
+- Cross-platform (Win/macOS/Linux), Apple Silicon first-class via MLX.
+
+MODEL DOWNLOAD MECHANISM
+- In-app search of Hugging Face; downloads GGUF (llama.cpp) and MLX-format models directly. No custom registry; model formats: GGUF, MLX, and (historically) some SafeTensors via converter. No CLI registry/`pull` like Ollama.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- Closed source: no way to audit the inference core; only the SDK/CLI are open (MIT). A recurring criticism for an "open models" tool.
+- Version drift and API churn: local server port and SDK semantics changed across versions (e.g., 1234 -> newer JSON-RPC/lms tooling), breaking integrations.
+- Historically locked down: no headless/Docker first-class story, limited Linux support early on, resource-heavy Electron app.
+- No built-in multi-user/auth/team features; geared to single-desktop use, not server/multi-tenant deployment.
+- GPU feature support (AMD/Intel) and bleeding-edge quantization formats lag llama.cpp upstream.
+
+TOOL CALLING / MCP SUPPORT
+- Function calling / tool_calls supported in the local OpenAI-compat API and first-class in the SDKs (define tools, run "autonomous agents" locally). Strong.
+- MCP: supported — the app can act as/connect to MCP (model context protocol) for agentic workflows; used with agent hosts. Mature relative to many peers but tied to the desktop app.
+
+MULTIMODAL SUPPORT
+- Text + vision (multimodal LLMs like LLaVA, Qwen-VL, Llama 3.2 Vision) via the local server. Embeddings supported. No native audio/TTS/image-gen in core (Bionic adds local voice transcription on top). Primary: text + image.
+
+RESOURCE MANAGEMENT
+- Manual load/unload of models (via UI or SDK `load`/`unload`); GPU offload layer slider; context-length setting; VRAM usage preview. Concurrency limited (single model per request stream; can keep multiple models resident). No automatic idle unload (manual); no cross-app coordination — it holds GPU VRAM until the user unloads or quits.
+
+ABSTRACTION HINTS
+- Clean client/server seam: the local HTTP server + OpenAI-compat `/v1` surface is the intended integration boundary (SDKs talk to it). The closed runtime hides llama.cpp/MLX behind that server, making it an opaque but stable "model provider" target. The OpenAI-compat API is the natural abstraction seam for a unified runner layer; the SDK's extra operations (load/unload/config) reveal a second, resource-management API that generic OpenAI clients can't express.

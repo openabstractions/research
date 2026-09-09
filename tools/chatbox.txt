@@ -1,0 +1,25 @@
+CHATBOX
+=======
+
+CATEGORY: client
+LICENSE: GPL-3.0 (Community Edition; closed-source Pro repo + chatbox.ai cloud)
+
+WHAT IT IS
+  Native desktop/mobile/web AI client that stores API keys locally and talks directly to ChatGPT, Claude, Gemini and local LLMs.
+
+ARCHITECTURE / SEAMS
+  Electron + React + TypeScript. Clean seams: src/main / src/renderer / src/preload / src/shared; provider adapters (model definitions) as a natural gateway boundary; MCP client runtime as a separable tool layer. Monolith seams: renderer is a large React app; provider/model config coupled to UI state. No server, no DB — local-first by design.
+
+STINKS
+  - GPL-3.0 is a red flag for commercial embedding/derivative work.
+  - Community vs Pro split: feature parity gap, team/sync paywalled to cloud.
+  - Thin by design — no RAG server, no multi-user self-host, no agents beyond MCP.
+  - Provider adapter coverage lags new API features (Responses API, vision nuances).
+
+DONE GREAT
+  - Clean Electron main/preload/renderer separation.
+  - Local-first privacy story: keys on device, no server required.
+  - MCP support (v1.14) with one-click deep-link server install.
+
+ABSTRACTION ANGLE
+  Occupies only the client layer — the thinnest of the batch, which makes it the cleanest reference for what "just a client" should be. It implies a "provider gateway" (adapter per provider) but nothing else. What we'd extract: the provider-adapter interface and the MCP tool runtime; everything above them is the universal client standard.

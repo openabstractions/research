@@ -1,0 +1,24 @@
+DeepSeek
+=========
+
+CATEGORY: cloud API platform / model provider
+LICENSE: n/a closed
+
+WHAT IT IS
+  Closed-serve host of open-weight DeepSeek models, positioned as a cheap, drop-in backend for agent tools.
+
+ARCHITECTURE / SEAMS
+  Dual-format: OpenAI-compatible AND Anthropic-compatible endpoints (plus Responses API) driven by either SDK via base_url swap. No native MCP/A2A; positioned as a drop-in for Claude Code, Copilot, OpenCode.
+
+STINKS
+  - No native multimodal (text-only API).
+  - reasoning_content must be specially preserved in multi-turn; naive OpenAI SDK clients drop it.
+  - strict mode needs a separate /beta base_url and an incomplete JSON-schema subset; peak/off-peak pricing complicates cost.
+
+DONE GREAT
+  - Mainstreamed "one model, both OpenAI and Anthropic endpoints" — proves the ecosystem is now polyglot on two formats.
+  - Very cheap with automatic KV caching (~1/50th hit cost).
+  - Tool calls supported in thinking mode.
+
+ABSTRACTION ANGLE
+  Proof the ecosystem has exactly two canonical formats. reasoning_content is the canonical reasoning-normalization problem (vs OpenAI reasoning tokens, Anthropic thinking blocks). strict mode mirrors OpenAI structured outputs — abstractions need per-provider schema-subset awareness.

@@ -1,0 +1,78 @@
+INFERENCE OPTIMIZATIONS (how production squeezes GPUs)
+======================================================
+
+1) Prefill vs Decode phases (fundamental, drives everything)
+- Prefill: process the whole input prompt in parallel (compute-bound, matmul-heavy,
+  batch-friendly). Produces the KV cache for the prompt.
+- Decode: generate one token at a time autoregressively (memory-bandwidth-bound,
+  latency-critical). Each step re-reads the ENTIRE KV cache.
+- Because prefill is compute-bound and decode is bandwidth-bound, running both in the
+  same engine instance causes them to steal resources from each other (prefill bursts
+  stall decode => p99 latency spikes).
+
+2) Disaggregated serving (Prefill-Decode / PD split)
+- Run prefill and decode on SEPARATE GPU pools, transferring KV cache between them
+  (often over NVLink/InfiniBand via RDMA, or via KV-transfer libs like Mooncake /
+  NVIDIA NIXL). Lets each pool be tuned independently and scale independently.
+- SGLang PD: https://lmsys.org/blog/2025-05-05-large-scale-ep/
+  TRT-LLM disaggregated serving: https://nvidia.github.io/TensorRT-LLM/blogs/tech_blog/blog5_Disaggregated_Serving_in_TensorRT-LLM.html
+  vLLM disaggregated: https://docs.vllm.ai/en/latest/ (serving/disaggregated)
+
+3) KV cache management
+- PagedAttention (blocked KV): no fragmentation, shareable across requests.
+  Paper: https://arxiv.org/abs/2309.06180
+- RadixAttention (SGLang): radix-tree prefix cache, shares KV over overlapping
+  prefixes (system prompt + branching user turns). https://lmsys.org/blog/2024-01-17-sglang/
+- Prefix caching (vLLM): exact-prefix reuse. https://docs.vllm.ai/en/latest/design/prefix_caching/
+- KV cache offload to CPU/disk for very long contexts (vLLM KV offload, TRT-LLM,
+  KServe advertises KV offload).
+- KV cache quantization (INT8/FP8 KV) to halve memory (LMDeploy does INT8/INT4 KV).
+- Multi-turn reuse (TRT-LLM "KV cache reuse"): https://developer.nvidia.com/blog/introducing-new-kv-cache-reuse-optimizations-in-nvidia-tensorrt-llm/
+
+4) Batching strategies
+- Continuous batching (always-on). Sub-variants:
+  - Chunked prefill: split large prompts into chunks interleaved with decode to cap
+    prefill latency and bound the scheduling quantum.
+  - Dynamic split-fuse (LMDeploy "dynamic split&fuse").
+  - Priority / QoS queues (time-to-first-token vs throughput classes).
+
+5) Quantization in production (the big levers)
+- Weight-only vs activation-aware:
+  - GPTQ (Optimal Brain Surgeon-style, layerwise, quantize + re-solve weights to
+    minimize output error). Paper: https://arxiv.org/abs/2210.17323
+  - AWQ (Activation-aware Weight Quantization): protect ~1% salient channels by
+    per-channel scaling derived from activation statistics; no backprop/reconstruction.
+    MLSys 2024 Best Paper. https://arxiv.org/abs/2306.00978
+- Precision ladder used in prod (most -> least accurate):
+  FP16/BF16 > FP8 (weights+activations, Hopper/Blackwell tensor cores) > INT8
+  weight-only > INT4 (AWQ/GPTQ) > FP4 (NVFP4, Blackwell). MXFP4/MXFP8/MXFP6
+  (microscaling) formats now shipping on Blackwell.
+- FP8 is the current sweet spot: native tensor-core support, ~2x memory + ~2x
+  throughput vs BF16, minimal quality loss. NVIDIA DeepSeek-R1-FP4 and nvidia/model-
+  optimizer collection on HF are production artifacts.
+- Serving engines consume all of these (vLLM quant list includes FP8/MXFP8/NVFP4/
+  INT8/INT4/GPTQ/AWQ/GGUF/compressed-tensors/TorchAO).
+
+6) Parallelism for serving (sharding)
+- Tensor Parallel (TP): split each layer's weight matrix across GPUs; needs high-
+  bandwidth interconnect (NVLink). Same node / same rack.
+- Pipeline Parallel (PP): split layers into stages across GPUs/nodes; lower comms,
+  allows cross-node, but harder to load-balance (bubble).
+- Data Parallel (DP): N replicas of the whole model; scales throughput linearly,
+  needs a load balancer with KV/prefix affinity.
+- Expert Parallel (EP): for MoE, place different experts on different GPUs, route
+  tokens to them (all-to-all comms). Crucial for DeepSeek/Mixtral at scale.
+  SGLang EP blog: https://lmsys.org/blog/2025-05-05-large-scale-ep/
+- Context Parallel (CP): split a single long sequence's KV across GPUs.
+- Typical combos: TP+PP for one big model; DP at the fleet level; EP for MoE;
+  PD disaggregation orthogonal on top. vLLM parallelism guide:
+  https://docs.vllm.ai/en/latest/serving/parallelism_scaling/
+
+7) Kernel/execution tricks
+- CUDA graphs (capture the decode loop to eliminate launch overhead).
+- FlashAttention/FlashInfer/FlashMLA (fused attention, no O(n^2) HBM round-trips).
+- Fused MoE kernels (CUTLASS, one-sided all-to-all over NVLink).
+- torch.compile graph-level transforms; piecewise CUDA graphs (vLLM).
+
+Net effect of the stack: a 70B model goes from ~1 GPU (unusable) to ~10-40k tok/s
+on one B200/H200 node with FP8 + speculative decoding + continuous batching.

@@ -1,0 +1,208 @@
+GOOGLE `google.longrunning.Operation` — as prior art for a durable job handle
+=============================================================================
+
+CATEGORY: prior art for the Task/Job/Future abstraction (out-of-process group)
+ADDED: 2026-08-19
+SOURCES: google/longrunning/operations.proto (googleapis/googleapis, master, fetched
+  2026-08-19); AIP-151 "Long-running operations" (google.aip.dev/151, fetched
+  2026-08-19); api-linter rules 151/lro-metadata-type and 151/operation-info.
+STATUS: the closest existing thing to what this project needs. Steal the shape.
+  It is NOT sufficient on its own — see WHAT IT DOES NOT DO.
+
+WHY THIS ONE FIRST
+  Every other candidate in this survey is either (a) an in-process language
+  primitive that dies with the process, or (b) a whole execution engine you must
+  adopt wholesale. LRO is the only widely deployed design that is *just the handle*:
+  a record and a protocol, defined in a language-neutral IDL, with client bindings
+  generated for Go, Java, Python, C#, Node, Ruby, PHP, C++ and Rust from the same
+  .proto. That is exactly METHOD §6's "define the record and the protocol, let each
+  language bind them its own way", and it is already done, in production, at scale,
+  since roughly 2016.
+
+  It is also the only one where the handle is explicitly designed to be given to
+  someone who did not create the work. `name` is a server-assigned string. Nothing
+  in it is a pointer, a callback, a channel, or a closure.
+
+THE RECORD (exact, from operations.proto)
+  message Operation {
+    string name         = 1;  // server-assigned; "only unique within the same
+                              // service that originally returns it"
+    google.protobuf.Any metadata = 2;  // "service-specific metadata ... typically
+                              // contains progress information and common metadata
+                              // such as create time"
+    bool done           = 3;  // false = still in progress; true = completed
+    oneof result {
+      google.rpc.Status error    = 4;  // "in case of failure OR CANCELLATION"
+      google.protobuf.Any response = 5;
+    }
+  }
+
+  Five fields. That is the whole state model. Note what is *not* there:
+    - no state enum (no QUEUED/RUNNING/PAUSED). Just `done`.
+    - no progress field. Progress is punted into `metadata`, typed per-service.
+    - no cancellation-requested flag. You cannot tell from the record whether a
+      cancel was asked for; cancellation surfaces only as a terminal `error`.
+    - no owner, no lease, no expiry, no resumability.
+
+THE PROTOCOL (exact, from operations.proto)
+  service Operations {
+    ListOperations(name, filter, page_size, page_token, return_partial_success)
+    GetOperation(name)                -> Operation
+    DeleteOperation(name)             -> Empty
+    CancelOperation(name)             -> Empty
+    WaitOperation(name, timeout)      -> Operation
+  }
+
+  Six verbs' worth of meaning in five RPCs. Semantics that matter:
+
+  GetOperation    — poll. The only way to observe. There is no push, no stream, no
+                    watch in the standard service. (Individual Google APIs bolt on
+                    Pub/Sub notifications; that is not part of LRO.)
+  WaitOperation   — long-poll with a client-supplied `timeout`. The proto states:
+                    "If the timeout specified is greater than the default HTTP/RPC
+                    timeout, the HTTP/RPC timeout is used", and the server may
+                    return before the timeout expires. So it is a *hint*, not a
+                    contract — you must still loop.
+  CancelOperation — the proto is explicit: "The server makes a best effort to cancel
+                    the operation, but success is not guaranteed." Clients must poll
+                    GetOperation to find out whether it worked. Cancellation is
+                    ADVISORY and ASYNCHRONOUS. This is the honest design and the
+                    right one for cross-process work.
+  DeleteOperation — "indicates that the client is no longer interested in the
+                    operation result. It does NOT cancel the operation." Delete and
+                    cancel are separate verbs with separate meanings. This split is
+                    the single most under-appreciated thing in the design (see
+                    WHAT TO STEAL, item 3).
+  ListOperations  — a third party can enumerate. The handle space is discoverable,
+                    not just addressable.
+
+  AIP-151 additions:
+    - Methods returning an LRO MUST carry a `google.longrunning.operation_info`
+      annotation naming `response_type` and `metadata_type`. The generic `Any`
+      fields are made statically typed at the *method* level, not the message
+      level. This is how they get type safety without putting generics in the wire
+      record. Important trick.
+    - "Operations that fail during their execution phase MUST return an error
+      response, placed in the Operation.error google.rpc.Status field." Errors that
+      prevent the operation from *starting* are returned inline instead — a failed
+      start is not an operation at all.
+    - Metadata "is used to provide information such as progress, partial failures,
+      and similar information on each GetOperation call."
+    - Expiry: "APIs MAY allow their operation resources to expire after sufficient
+      time has elapsed after the operation completed", with 30 days given as the
+      suggested retention. So the handle is durable but not eternal, and the
+      lifetime is a per-service policy, not part of the standard.
+    - Concurrency: a resource may queue parallel operations or refuse new ones with
+      ABORTED. Declarative APIs may let a new operation "preempt existing
+      operations".
+
+ANSWERS TO THE SURVEY QUESTIONS
+  How is a job identified?
+    A single opaque server-assigned string `name`. Conventionally a resource path
+    like `projects/p/locations/l/operations/abc123`, but the proto only promises
+    uniqueness *within the service that issued it*. That is a weaker guarantee than
+    it looks: an LRO name is NOT globally meaningful. To make it portable you must
+    carry the service endpoint alongside it. UNCERTAIN whether any Google API
+    documents a canonical (endpoint, name) tuple format; I did not find one.
+
+  Who can query it?
+    Anyone with credentials for the service and the name. There is no notion of the
+    creating process, connection, or session. The handle survives the client
+    entirely because the client was never part of it. This is the property this
+    project needs and almost nothing else in the survey has.
+
+  What survives?
+    Client process exit: yes, trivially — the state is server-side.
+    Client machine reboot: yes.
+    Server restart: unspecified by LRO; a per-implementation matter.
+    Sleep/network loss: yes; polling just resumes.
+
+  How is progress expressed?
+    Not standardised. `metadata` is `Any`, per-service. In practice services carry
+    things like a percent, a step name, and partial-failure lists. AIP-151 mandates
+    a metadata *type* exist but does not mandate any *field* in it. This is a
+    deliberate refusal to standardise progress, and it is the main gap for us.
+
+  How is cancellation requested from outside?
+    CancelOperation(name) by any credentialed party. Best-effort, asynchronous,
+    observed by polling, surfaced as a terminal `error` with (by convention)
+    google.rpc.Code.CANCELLED.
+
+  Can a job be handed off from one implementation to another mid-flight?
+    No. There is no adoption, take-ownership, lease, or transfer verb. An operation
+    belongs to the service that created it for its whole life. If a Google service
+    internally migrates the work between machines, that is invisible and not part of
+    the contract. For this project's "app -> system service -> NAS" chain, LRO
+    describes each *link* well and says nothing about the chain.
+
+WHAT TO STEAL, EXACTLY
+  1. The record is five fields and one of them is a `oneof`. Resist adding a state
+     enum. `done` + `error|response` is enough to write the log line
+     (METHOD §2) and forces no implementer to agree on internal states.
+  2. `metadata` as an opaque, typed-by-annotation extension point. This is METHOD §4
+     "holes are part of the interface" done in protobuf: carry it verbatim, name its
+     type, declare projection lossy. Do the same, but — unlike Google — standardise
+     a *small* progress shape inside it (see SUMMARY).
+  3. Cancel and Delete as different verbs. "Stop doing the work" and "I no longer
+     care about the answer" are different requests and a downloader needs both:
+     an app closing must be able to say "keep going, I'll come back" (delete my
+     interest, not the job) versus "abort and clean up". Almost every in-process
+     primitive in Group A conflates these into one `cancel()`.
+  4. Cancellation is best-effort, asynchronous, and confirmed by polling. Do not
+     promise a synchronous cancel across a process boundary. You cannot deliver it.
+  5. WaitOperation's shape — a long-poll with a client timeout that the server may
+     shorten. It makes efficient waiting possible without requiring a push channel,
+     which matters when the implementation may be a CLI, a service, or a NAS that
+     cannot call you back.
+  6. ListOperations. Enumerability is what makes the boundary observable
+     (METHOD §2). A handle you can only query if you already have the id is a much
+     weaker audit surface. Note this is exactly the property the logging survey
+     found missing from log files: "show me everything this machine is doing".
+  7. The operation_info annotation trick: keep the wire record generic, restore
+     static types at the method that produces it. This is how you avoid inventing
+     generics in an IDL.
+
+WHAT IT DOES NOT DO (and we need)
+  - No handoff/adoption. Nothing lets implementation B take over A's operation.
+  - No lease or liveness. If the server dies with `done=false`, the handle is a
+    lie forever and no protocol element detects it. There is no heartbeat, no
+    renew, no "last progress at". A stuck LRO and a slow LRO are indistinguishable.
+  - No standard progress fields. Every service invents its own; a generic client
+    cannot render a progress bar. For a downloader facade this is disqualifying on
+    its own.
+  - No resumption semantics. There is no `resume`, no `suspend`, no byte-offset
+    notion. (BITS has these; see handoff-reclamation.txt.)
+  - No two-phase completion. `done=true` means the answer is in `response`. There
+    is no state where the work is finished but the artifact has not been claimed by
+    the caller — which is precisely what a downloader needs so that a crashed
+    client does not leave a half-adopted file. BITS's TRANSFERRED -> Complete() ->
+    ACKNOWLEDGED is better here.
+  - Names are only service-unique, so a handle is not self-describing. You must
+    carry the endpoint separately or define a URI form.
+  - Poll-only. No change notification in the standard. Acceptable, but it means
+    latency and wakeups are the client's problem — relevant given this project's
+    stated concern about background processes costing the user resources.
+
+HONEST ASSESSMENT
+  LRO is the right *skeleton* and roughly half the *flesh*. It proves the core
+  claim of this project's method: a durable, cross-language, cross-process async
+  handle is expressible as a record plus five verbs, in an IDL, with idiomatic
+  bindings per language, and it works in production. Nobody needs to be convinced
+  that this is possible.
+
+  What it does not prove is that the interesting parts — progress, resumption,
+  liveness, adoption — can be standardised, because Google declined to standardise
+  every one of them. That declination is data. Where LRO leaves a hole, assume the
+  hole is there because uniformity was genuinely hard, and require a real failing
+  case (METHOD §5) before filling it.
+
+KILL CONDITION FOR "JUST USE LRO"
+  If a survey of the actual implementations we intend to wrap (ComfyUI queue,
+  Ollama pull, Lemonade, BITS, plain HTTP range downloads) shows that every one of
+  them already exposes a poll-by-id endpoint with a percent field, then the work
+  here is a thin protobuf/JSON schema plus five verbs, and anything larger than
+  that is over-build. Conversely, if most of them expose only a streaming
+  connection with no id — Ollama's pull is a chunked JSON stream, not a job id —
+  then LRO's shape is not adoptable as-is and the facade must MINT ids and hold
+  state itself, which is a much bigger and much less certain thing. Check this
+  before designing anything.

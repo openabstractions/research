@@ -1,0 +1,74 @@
+CALLER IDENTITY OVER A LOCAL IPC CHANNEL
+========================================
+
+CATEGORY: platform mechanisms for a local service to identify its caller
+ADDED: 2026-09-05 — prior-art survey for the caller-identity layer (SCOPE.md §5).
+
+WHY THIS WAS SURVEYED
+  A first draft of SCOPE.md claimed Linux could only offer "a pid you must race
+  to resolve" and ranked the platforms weak-to-strong on that basis. The owner
+  pushed back: surely every platform has a channel where the service can
+  certainly tell who is talking. He was right, and the ranking was wrong.
+
+THE ANSWER, PER PLATFORM
+
+  Linux — AF_UNIX
+    SO_PEERCRED returns struct ucred {pid, uid, gid}. The credentials are
+    stamped BY THE KERNEL at connect() time; they are not read from the peer
+    later and the peer cannot assert them. uid/gid are therefore authoritative
+    and race-free.
+    SO_PEERPIDFD (kernel 6.5, 2023) returns a pidfd for the peer — a handle that
+    always refers to one process, closing the pid-reuse race that affected
+    resolving SO_PEERCRED's pid afterwards. SCM_PIDFD is the ancillary-message
+    equivalent. Proposed by a Wayland developer explicitly to fix the racy
+    identification D-Bus was doing via SO_PEERCRED's pid.
+    SO_PEERSEC returns the peer's LSM security context where one is configured.
+
+  Windows — named pipes / RPC / ALPC
+    ImpersonateNamedPipeClient + OpenThreadToken yields the caller's ACCESS
+    TOKEN, which is the operating system's own security principal — the same
+    object it uses for its own access checks. RpcImpersonateClient is the RPC
+    equivalent. GetNamedPipeClientProcessId gives the pid.
+    Application identity: package family name / AppContainer SID for MSIX
+    packaged apps. For a plain unpackaged .exe there is a path and nothing that
+    binds it.
+
+  macOS — XPC
+    The connection carries an audit token. SecCodeCreateWithXPCMessage
+    (SecCode.h) is the public route to a SecCodeRef for the caller, checkable
+    against a SecRequirementRef — bundle id, team id, certificate chain.
+
+THE ACTUAL GAP: "WHICH PROCESS" IS NOT "WHICH APPLICATION"
+  From the SO_PEERPIDFD discussion: pidfds gave a race-free way to identify a
+  process, and there was still no standardized way to figure out what that
+  process actually WAS.
+  On Linux that question fragments across sandbox engines with no common
+  answer — Flatpak exposes /proc/$PID/root/.flatpak-info, Snap is structured
+  entirely differently, Firejail differently again. There is no portable "which
+  application is this, verifiably".
+  Windows answers it only for packaged apps. macOS answers it properly, via the
+  code signature, and is the only one of the three that does.
+
+TRAP: THE OBVIOUS macOS CALL IS THE WRONG ONE
+  xpc_connection_get_audit_token is not public API and has been vulnerable —
+  see Sector 7, "Don't Talk All at Once! Elevating Privileges on macOS by Audit
+  Token Spoofing" (2023). Guidance is to use xpc_dictionary_get_audit_token or
+  SecCodeCreateWithXPCMessage.
+  Relevant to us because a facade whose easy path is the exploitable path has
+  failed at the only thing it exists for.
+
+THE DESIGN CONCLUSION OTHERS REACHED
+  Wayland and D-Bus stopped interrogating the peer. Instead each application
+  instance is given ITS OWN SOCKET, with the identity metadata (sandbox engine,
+  app id, instance) attached when that socket is created.
+  This is the important finding for our layer. Identity is established when the
+  channel is handed out, not asked per call. It is also the only shape that
+  degrades honestly, since the after-the-fact question is precisely the one
+  Linux cannot answer.
+
+SOURCES
+  https://lwn.net/Articles/926312/            SCM_PIDFD and SO_PEERPIDFD
+  https://blog.sebastianwick.net/posts/so-peerpidfd-usefulness/
+  https://blog.sebastianwick.net/posts/so-peerpidfd-gets-more-useful/
+  https://sector7.computest.nl/post/2023-10-xpc-audit-token-spoofing/
+  https://developer.apple.com/forums/thread/681053

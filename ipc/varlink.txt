@@ -1,0 +1,50 @@
+VARLINK
+=======
+
+CATEGORY: minimal JSON IPC protocol over any connection-oriented transport
+LICENSE: the protocol is a specification, not a library. systemd's sd-varlink is
+  LGPL-2.1 with the rest of systemd (UNVERIFIED by us; confirm before linking).
+  Independent implementations exist under permissive licences — verify per
+  binding rather than assuming.
+ADDED: 2026-09-05 — IPC survey for the channel layer (SCOPE.md §5).
+
+WHAT IT IS
+  "A super simple JSON based IPC protocol which only needs a point-to-point
+  connection." No broker, no kernel support, no daemon: TCP or a Unix socket
+  provides everything it needs. (LWN, lwn.net/Articles/742675/)
+
+WHY IT EXISTS — AND IT IS OUR ARGUMENT
+  systemd is moving toward varlink and away from D-Bus, and the stated reasons
+  are the same ones this survey found independently:
+  - the D-Bus broker cannot start until filesystems are mounted; varlink works
+    from early boot
+  - D-Bus multiplexing forces every message through one process; varlink lets
+    each connection be handled in a different process
+  - D-Bus has no flow control and is unusable for streaming or many large
+    objects
+  sd-varlink was made public in systemd v257 and systemd ships varlinkctl.
+  (phoronix.com, systemd.io/USER_GROUP_API/, read 2026-09-05)
+
+FOR THE CARRY TEST (SCOPE.md §3)
+  The best in the survey alongside Cap'n Proto, and for a different reason: there
+  is so little protocol that carrying an implementation is cheap in any language.
+  A JSON-over-socket protocol is a plausible thing for three languages to
+  implement independently and conformance-test byte for byte — which is exactly
+  what this project already does for the job record and already has harnesses
+  for.
+
+WHAT IT DOES NOT SOLVE
+  It has no authority model of its own. It is a message protocol; who may call
+  what is left entirely to the transport and the service. That makes it
+  orthogonal to the identity-versus-capability question rather than an answer to
+  it — varlink could carry either.
+
+  It is also, in practice, a Linux/systemd-shaped ecosystem today. The protocol
+  is trivially portable; the tooling and the adoption are not. UNVERIFIED: the
+  state of Windows and macOS implementations.
+
+SOURCES
+  https://lwn.net/Articles/742675/
+  https://www.phoronix.com/news/Systemd-Varlink-D-Bus-Future
+  https://systemd.io/USER_GROUP_API/
+  https://lists.freedesktop.org/pipermail/dbus/2024-March/018395.html

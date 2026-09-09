@@ -1,0 +1,411 @@
+HANDOFF AND RECLAMATION — how a job outlives the process that started it
+=========================================================================
+
+CATEGORY: prior art for the Task/Job/Future abstraction (the decisive requirement)
+ADDED: 2026-08-19
+STATUS: this is the part of the seam that is NOT solved by any language primitive
+  and IS solved, separately and incompatibly, by every major OS. The designs
+  agree more than they disagree. That agreement is the extractable interface.
+RELATED: research/transfer/SUMMARY.txt (2026-08-18) reached the same conclusion
+  from the transfer side: "A URL is a source, not a job", and job identity is the
+  requirement everything hangs off. Where I disagree with it is noted at the end.
+
+THE QUESTION THIS FILE ANSWERS
+  An app submits a download. The app is SIGKILLed / force-quit / the machine
+  reboots. Five minutes later a different process — the app restarted, or a
+  different app, or a service — needs to (a) discover that job exists, (b) find
+  out where it got to, (c) either take it over or leave it alone, and (d) not
+  corrupt the partial artifact by doing so.
+
+  No `Future<T>`, `Task<T>`, `Job`, `Promise`, or `JoinHandle` in any language
+  addresses any of a-d, because all of them are heap objects. This is not a
+  criticism of them; it is a statement that they are solving a different problem.
+
+---------------------------------------------------------------------------
+1. THE REFERENCE POINT: WINDOWS BITS
+---------------------------------------------------------------------------
+  Established in research/transfer/bits.txt and research/transfer/SUMMARY.txt
+  (2026-08-18). Restated here only as the yardstick the others are measured
+  against, because it is the most complete of the lot:
+
+    - Identity: a GUID. Persisted in the service's on-disk queue (qmgr.db).
+    - Any process with the GUID can open the job: IBackgroundCopyManager::GetJob.
+      Enumeration without a GUID: EnumJobs, and BG_JOB_ENUM_ALL_USERS for an
+      elevated caller.
+    - Ownership transfer: IBackgroundCopyJob::TakeOwnership, plus the PowerShell
+      surface Get-BitsTransfer -AllUsers. NOTE: I did not independently re-verify
+      the exact privilege requirement for TakeOwnership in this pass; the sibling
+      survey asserts it and Microsoft documents the method. Treat "an
+      administrator can adopt another user's job" as documented, "a peer user can"
+      as UNVERIFIED.
+    - Survives: process exit, logoff (suspend + auto-resume at logon), reboot,
+      network loss. 90-day JobInactivityTimeout is the reaper.
+    - Progress: GetProgress, pollable from any process holding the GUID.
+    - Out-of-process completion hook: SetNotifyCmdLine runs a program when the
+      job finishes even if the submitter is gone.
+    - TWO-PHASE COMPLETION: BG_JOB_STATE_TRANSFERRED is a real, durable state.
+      The downloaded file does not exist at the caller's path until Complete()
+      is called (-> ACKNOWLEDGED). Cancel() (-> CANCELLED) deletes it. Both are
+      final states; a job in a final state stops appearing in enumerations.
+      (Source: learn.microsoft.com "Life Cycle of a BITS Job", fetched
+      2026-08-19; states BG_JOB_STATE_{SUSPENDED,QUEUED,CONNECTING,TRANSFERRING,
+      TRANSIENT_ERROR,ERROR,TRANSFERRED,ACKNOWLEDGED,CANCELLED}.)
+
+  BITS is the only system in this whole survey that has ALL of: durable id,
+  third-party query, third-party adoption, progress, and two-phase completion.
+  It is Windows-only, COM-only, and file-transfer-only. That is the gap.
+
+---------------------------------------------------------------------------
+2. UWP Windows.Networking.BackgroundTransfer — THE ADOPTION RITUAL, NAMED
+---------------------------------------------------------------------------
+  Source: learn.microsoft.com "Background transfers" and the BackgroundDownloader
+  / DownloadOperation reference (fetched 2026-08-19).
+
+  This is BITS's successor API for sandboxed apps and it makes the reclamation
+  protocol explicit as a documented startup ritual:
+
+    1. "Background Transfer will continue to transfer files ... even when the app
+       is suspended or when it exits."
+    2. On every app start: BackgroundDownloader.GetCurrentDownloadsAsync() to
+       enumerate incomplete transfers belonging to this app.
+    3. DownloadOperation.AttachAsync() on each one — this both retrieves current
+       state AND "cause[s] the transfers to be resumed after a system reboot".
+    4. Documented failure mode if you skip it: "operations from the previous
+       session ... will remain incomplete and continue to occupy resources."
+
+  Two design facts worth stealing:
+    - ATTACH IS AN EXPLICIT VERB, and it is what restarts the work after reboot.
+      The system holds the job but does not necessarily drive it until someone
+      re-attaches. That is a deliberate liveness coupling: no owner, no progress.
+      Compare BITS, which drives jobs with no owner attached at all. Two
+      defensible answers; the interface must pick one or expose the difference.
+    - SCOPING BY GROUP NAME. "specify a unique group name string (for example, a
+      GUID) when creating downloads, and a download with a group name string can
+      only be enumerated by providing the matching string". This is how a
+      *library* inside an app avoids stealing the *app's own* jobs. Any facade
+      that enumerates jobs on a shared machine needs this or it will adopt
+      somebody else's work.
+
+---------------------------------------------------------------------------
+3. iOS BACKGROUND URLSession — THE HANDLE IS A STRING YOU CHOSE
+---------------------------------------------------------------------------
+  Sources: Apple URLSession documentation; avanderlee.com "URLSession: Common
+  pitfalls with background download & upload tasks"; Apple Developer Forums
+  thread 124265 (all fetched 2026-08-19). Mechanism details below are
+  well-attested but Apple's own wording is scattered; treat specifics as
+  high-confidence, not quoted.
+
+  Shape:
+    - Identity: a session identifier STRING CHOSEN BY THE APP, passed to
+      URLSessionConfiguration.background(withIdentifier:). This is the opposite
+      of LRO and BITS, where the system mints the id. The app-chosen id is what
+      makes reattachment possible without the app having persisted anything.
+    - The transfer is executed by a separate system daemon (nsurlsessiond), not
+      by the app's process. The app can be suspended or terminated.
+    - Reclamation: the system RELAUNCHES THE APP IN THE BACKGROUND and calls
+      application(_:handleEventsForBackgroundURLSession:completionHandler:) with
+      the identifier. The app recreates a URLSession with that same identifier
+      and its delegate then receives the outstanding events. Enumeration within
+      a session: getAllTasks / getTasksWithCompletionHandler.
+    - Constraint: only ONE URLSession object may exist per identifier at a time.
+      The identifier is a single-holder claim, not a shared query key. A third
+      party cannot observe it; only the owning app can, and only one instance of
+      it. This is strictly weaker than BITS for our purposes.
+    - Two-phase completion, again: on success the delegate is handed a TEMPORARY
+      file URL and must move the file synchronously inside the delegate call, or
+      it is deleted. Same shape as BITS TRANSFERRED -> Complete().
+    - RESUME DATA: cancel(byProducingResumeData:) returns an opaque Data blob
+      that can be persisted and later handed to downloadTask(withResumeData:) —
+      possibly in a different session. This is the only mechanism I found in the
+      whole survey that is a genuinely TRANSFERABLE, SERIALISABLE RESUMPTION
+      TOKEN produced by the runtime. It is opaque (server ETag + byte offset +
+      temp file location, in practice) and it is famously fragile. Treat it as
+      METHOD §4 material: carry it verbatim, name it a hole, never interpret it.
+
+  The lesson: an app-chosen identifier plus a system-side executor plus
+  relaunch-to-deliver is a complete out-of-process design that needs no shared
+  handle type at all. The "handle" is a string constant compiled into the app.
+
+---------------------------------------------------------------------------
+4. ANDROID — TWO DIFFERENT ANSWERS, AND THE DIFFERENCE MATTERS
+---------------------------------------------------------------------------
+  (a) WorkManager (androidx.work). Sources: developer.android.com "Managing
+      work" and "Update work that is already enqueued" (fetched 2026-08-19).
+
+      - Identity: a UUID generated by the library per WorkRequest, PLUS an
+        app-chosen "unique work name" (enqueueUniqueWork) with a collision policy
+        — REPLACE / KEEP / APPEND / APPEND_OR_REPLACE. The unique name is the
+        useful handle: it is stable across app installs of the same version and
+        is what you actually persist. The UUID is described in the docs as "not
+        developer-friendly".
+      - Storage: an on-device SQLite (Room) database owned by the library, inside
+        the app's data directory.
+      - Survives: process death and reboot. "WorkManager automatically
+        re-enqueued after the app is restarted"; a boot receiver rebuilds the
+        schedule.
+      - Query: getWorkInfoById / getWorkInfoByIdLiveData / getWorkInfosByTag /
+        getWorkInfosForUniqueWork. Observable as LiveData or Flow.
+      - PROGRESS IS FIRST CLASS: Worker.setProgress(Data) / CoroutineWorker
+        .setProgress, surfaced in WorkInfo.getProgress(). Note the documented
+        caveat that progress is cleared once the work reaches a terminal state —
+        progress is explicitly transient, not part of the durable record.
+      - Cancellation: cancelWorkById(UUID), cancelUniqueWork(name),
+        cancelAllWorkByTag. Cooperative: the Worker must check isStopped(). Also
+        createCancelPendingIntent, so a *notification* — i.e. the user, from
+        outside the app — can cancel a job. That is a real "third party requests
+        cancellation" path.
+      - THE CRITICAL LIMITATION: the work runs IN THE APP'S OWN PROCESS.
+        WorkManager does not do the work; it restarts your process to do it.
+        So it is durable *scheduling*, not durable *execution*, and no other
+        app can query or adopt the job. The database is private.
+
+  (b) android.app.DownloadManager — the actual BITS analogue.
+      - A system service performs the download. Identity: a long id returned by
+        enqueue(). Query: a ContentProvider cursor with COLUMN_STATUS,
+        COLUMN_BYTES_DOWNLOADED_SO_FAR, COLUMN_TOTAL_SIZE_BYTES. Completion is
+        announced by an ACTION_DOWNLOAD_COMPLETE broadcast carrying the id.
+      - Survives the app entirely; the app need not be running.
+      - Cross-app adoption is NOT available: the download is attributed to the
+        requesting package and other packages cannot claim it. UNVERIFIED
+        whether any privileged path exists; I did not find one.
+
+  So Android splits BITS's job in half: WorkManager has the durable record and
+  the progress API but runs in your process; DownloadManager runs out of process
+  but has no adoption and no general job model. Neither is BITS.
+
+---------------------------------------------------------------------------
+5. LEASE / CLAIM PROTOCOLS — HOW A THIRD PARTY DECIDES IT IS SAFE TO TAKE OVER
+---------------------------------------------------------------------------
+  This is the mechanism section. Everything above is a product; this is the
+  toolbox any of them are built from. Four families, in increasing honesty.
+
+  (5.1) TIME LEASES. Holder must renew or lose the claim.
+      Kubernetes coordination.k8s.io/v1 Lease (source: kubernetes.io "Leases",
+      fetched 2026-08-19): fields holderIdentity, leaseDurationSeconds,
+      renewTime, acquireTime, leaseTransitions. "leaseDurationSeconds is a
+      duration that candidates for a lease need to wait to force acquire it,
+      measured against the time of last observed renewTime." Used for node
+      heartbeats and controller leader election.
+      etcd: lease with TTL + KeepAlive stream; keys attached to a lease vanish
+      when it expires. Consul: sessions with TTL plus a lock-delay before a
+      released lock can be reacquired.
+      Message queues do the same thing under a different name: SQS VISIBILITY
+      TIMEOUT — the broker hides the message for N seconds; if the consumer does
+      not delete it in time the message is redelivered to someone else.
+      ChangeMessageVisibility is the heartbeat. ApproximateReceiveCount +
+      maxReceiveCount + a dead-letter queue is the give-up rule. Celery with a
+      Redis/SQS broker inherits exactly this, gated on task_acks_late=True;
+      the documented failure mode is a task longer than visibility_timeout being
+      executed again "and again in a loop" (docs.celeryq.dev, SQS broker page).
+
+      The known flaw, and it is not academic: a lease that expired does NOT prove
+      the old holder is dead. It proves it stopped talking. A GC-paused or
+      swapped-out holder can wake up and write. The standard fix is a FENCING
+      TOKEN — a monotonically increasing number issued with the claim, which the
+      *resource* checks and refuses if stale (Kleppmann, "How to do distributed
+      locking", 2016; the same idea as leaseTransitions / etcd revision).
+      For us the "resource" is the partial file on disk. If two implementations
+      can both believe they own the download of the same path, a lease alone is
+      not enough and the partial file will be interleaved garbage.
+
+  (5.2) OS-HELD CLAIMS. Liveness by kernel, not by clock. STRICTLY BETTER when
+      the claimant and the reclaimer are on the same machine, which is our case.
+      - POSIX: flock(2) on a lock/state file. The lock is attached to the open
+        file description and is released by the kernel when the process dies,
+        for any reason including SIGKILL. No timeout, no false positive, no
+        fencing token needed for the same-machine case. Caveat: fcntl(2) POSIX
+        record locks have the notorious "released on any close(), not inherited
+        across fork()" semantics; OFD locks (F_OFD_SETLK, Linux 3.15+) fix this.
+        Use flock or OFD locks, never plain fcntl locks.
+      - Linux: pidfd_open(2) gives a reference to a process that cannot be
+        recycled by PID reuse, and is pollable for exit.
+      - Windows: LockFileEx (mandatory, unlike POSIX advisory locks); a named
+        mutex, where the kernel reports WAIT_ABANDONED to the next waiter if the
+        owner died holding it — literally a built-in "the previous owner crashed"
+        signal; or simply an open handle to the owning process, waitable.
+      The design consequence: a durable job record on local disk plus a per-job
+      OS lock file gives you exact, immediate orphan detection with no heartbeat
+      traffic and no wrong answers. This is cheaper and more correct than a lease
+      and it is what a local facade should use. Leases only become necessary at
+      the NAS/network hop, where the kernel cannot help.
+
+  (5.3) FD / HANDLE PASSING. Hand over the live resource, not a claim on it.
+      - POSIX: SCM_RIGHTS control message over an AF_UNIX socket passes an open
+        file descriptor to another process; the receiving process gets a real
+        descriptor with its own offset. This is the only true zero-downtime
+        handoff primitive.
+      - systemd socket activation: the manager holds the listening socket and
+        passes it to the service via LISTEN_FDS / LISTEN_PID (fds numbered from
+        3), so the service can be restarted without dropping connections.
+      - nginx binary upgrade: SIGUSR2 causes the master to exec a new binary
+        which INHERITS the listening descriptors, their numbers passed in the
+        "NGINX" environment variable (nginx.org, ngx_core_module docs).
+      - Envoy hot restart: parent and child "communicate with each other over
+        unix domain sockets using a basic RPC protocol" and the parent passes
+        listening sockets, then drains (envoyproxy.io hot restart docs). Stats
+        were originally in shared memory and were later moved onto that RPC.
+      - Windows has NO SCM_RIGHTS equivalent. The analogues are DuplicateHandle
+        with an explicit target process handle (which requires the *source* to
+        act, so the source must be alive) and WSADuplicateSocket for sockets.
+      CONCLUSION FOR US: live handoff requires BOTH processes alive and a
+      platform-specific mechanism that does not exist uniformly. It cannot be in
+      a cross-language interface. What CAN be in the interface is the weaker,
+      universal form: a durable descriptor + a byte offset + a verified prefix,
+      i.e. re-open rather than transfer. The transfer survey reached the same
+      place by a different road (append-verify).
+
+  (5.4) CHECKPOINT AS HEARTBEAT. Temporal's activity heartbeat is worth calling
+      out separately because it collapses (5.1) and resumption into one thing:
+      an activity calls RecordHeartbeat(details); if the worker dies and the
+      activity is retried on another worker, the new attempt is handed the LAST
+      HEARTBEAT DETAILS. So the liveness signal and the resume checkpoint are
+      the same message. Cancellation is also delivered through it — Temporal's
+      docs state an activity must heartbeat (with a heartbeat timeout set) to
+      receive a cancellation request at all. That is a very economical design:
+      one channel carries liveness, progress, resume point, and cancellation
+      delivery. See durable-execution.txt.
+
+---------------------------------------------------------------------------
+6. WHAT SURVIVES SIGKILL — THE ACTUAL ANSWER
+---------------------------------------------------------------------------
+  Reclamation is possible if and only if the job's state is somewhere other than
+  the dying process. Everything else is a consequence. The observed storage
+  choices, and who wrote them:
+
+    system service, private on-disk queue   BITS (qmgr.db), nsurlsessiond,
+                                            Android DownloadManager
+    library-owned DB in the app's data dir  Android WorkManager (SQLite/Room)
+    server-side, remote                     google.longrunning.Operation,
+                                            Temporal, K8s Job, Celery backend
+    the artifact itself + a sidecar file    aria2 (.aria2 bitfield), libtorrent
+                                            resume data, rsync --partial
+    nothing                                 every Group A language primitive,
+                                            curl, hf_xet, rsync without --partial
+
+  And the four reclamation strategies actually in use:
+    A. ENUMERATE-AND-ATTACH at startup. BITS EnumJobs, UWP
+       GetCurrentDownloadsAsync+AttachAsync, iOS recreate-session-by-identifier,
+       WorkManager reschedule-on-boot. Requires an enumerable registry.
+    B. LEASE EXPIRY. SQS/Celery visibility timeout, K8s Lease, Consul session.
+       Requires a clock and tolerates false positives; needs fencing.
+    C. OS-HELD LOCK RELEASE. flock/LockFileEx/abandoned mutex. Exact, immediate,
+       same-machine only.
+    D. IDEMPOTENT RE-RUN. Do not reclaim; re-submit with the same idempotency
+       key and let the executor dedup. Restate/DBOS/Temporal (workflow id
+       reuse policy) all lean on this. Cheapest when the work is cheap; useless
+       for a 40 GB download, which is our case.
+
+  For this project: A + C locally, B only at the network hop, D never as the
+  primary strategy.
+
+---------------------------------------------------------------------------
+7. WHAT THIS MEANS FOR THE INTERFACE
+---------------------------------------------------------------------------
+  Extracted from the above, not designed:
+
+  a. The id must be MINTABLE BY THE CALLER or at minimum caller-namespaced.
+     iOS proves an app-chosen string is sufficient and it removes the bootstrap
+     problem: after a crash you can reattach without having successfully
+     persisted anything. WorkManager's "unique work name" and UWP's "group name"
+     are the same idea. LRO and BITS mint server-side and therefore REQUIRE the
+     submitter to durably persist the id before the work starts — a real
+     crash window (submitted, id not yet written, process dies, job orphaned and
+     unfindable). Prefer caller-supplied id + server-assigned id, both recorded.
+
+  b. There must be an ENUMERATE verb scoped by a namespace the caller controls.
+     Without scoping, a facade on a shared machine will adopt other software's
+     jobs. UWP names this explicitly; nobody else does, and it is a real bug
+     class.
+
+  c. ATTACH must be a distinct verb from SUBMIT and from GET. UWP separates
+     them and ties resumption to attach; BITS does not require attach at all.
+     Whether attach is required for progress to continue is a REAL DIFFERENCE
+     between implementations and must be a declared capability, not hidden.
+
+  d. Two-phase completion is not optional. BITS (TRANSFERRED -> Complete) and
+     iOS (temp URL -> move synchronously) independently arrived at it, for the
+     same reason: the producer and the consumer are different processes with
+     different lifetimes. A `done=true, response=<value>` model (LRO) cannot
+     express "finished but unclaimed", and that state is where crash-safety
+     lives. This is the clearest single thing LRO gets wrong for our use case.
+
+  e. Cancel must be separable into "stop the work" and "I no longer care".
+     LRO has both verbs (CancelOperation vs DeleteOperation). BITS conflates
+     them destructively — Cancel() DELETES transferred files, so there is no way
+     to say "release my claim, keep the bytes". A facade over BITS must
+     therefore implement detach itself and never map detach onto Cancel.
+
+  f. Liveness must be expressible, and it is NOT a state enum value. Every
+     durable design in this survey can produce a record that says "running"
+     forever after its executor died. The fix used in practice is either an OS
+     lock (exact) or a last-heartbeat timestamp plus a timeout (approximate).
+     The record needs `updated_at` / `last_progress_at` at minimum. LRO has no
+     such field and this is its second serious omission.
+
+  g. Progress belongs in the record but is explicitly transient. WorkManager
+     clears it at terminal state; BITS's GetProgress is live-only; LRO parks it
+     in per-service metadata. The honest shape is: a small, standard, best-effort
+     triple (completed, total-or-unknown, unit) plus an opaque implementation
+     blob. Do not promise monotonicity — a resumed transfer that re-verifies its
+     prefix legitimately goes backwards.
+
+  h. The resumption token is a HOLE (METHOD §4). iOS resume data is opaque
+     server-and-daemon state; aria2's is a bitfield file; libtorrent's is a
+     bencoded blob; BITS's is inside the service. There is no chance of
+     normalising these. Carry verbatim, tag with the producing implementation,
+     refuse to use across implementations.
+
+---------------------------------------------------------------------------
+8. WHERE I DISAGREE WITH research/transfer/SUMMARY.txt
+---------------------------------------------------------------------------
+  Agreement first, because it is the larger part: "a URL is a source, not a job",
+  the descriptor is {content hash, chunk list, length, one or more sources}, and
+  Submit(desc) -> JobID / Attach / List is the minimum API. This survey reaches
+  the identical conclusion from the async side, from entirely different evidence
+  (iOS, Android, UWP, K8s, Temporal). Two independent surveys converging on the
+  same record is the strongest signal either of them produced.
+
+  Three disagreements, all narrow:
+
+  1. That summary treats the job descriptor as content-addressed (hash + chunk
+     manifest) because its subject is bulk transfer. The async abstraction is
+     also supposed to carry log flushes and model loads, which have no content
+     hash and no chunk list. So the content manifest cannot be part of the JOB
+     record; it is part of the DOWNLOAD-SPECIFIC payload carried inside it.
+     Keeping this separation is what stops the async interface from becoming a
+     download interface with extra steps. Concretely: `metadata`/`spec` is an
+     opaque typed extension (the LRO trick), and the chunk manifest lives there.
+
+  2. "The API must be at minimum Submit(desc) -> JobID, Attach(JobID), List()."
+     That set is missing the verb this survey found to be load-bearing in two
+     independent OS designs: an explicit two-phase FINALIZE/ACKNOWLEDGE distinct
+     from both completion and cancellation, and its inverse DETACH ("release my
+     interest, keep the work"). Five verbs minimum, not three. The summary
+     does note two-phase completion in its own point 2 but does not carry it up
+     into the API sketch; I think that is an oversight rather than a
+     disagreement.
+
+  3. The summary's capability list (survives_process_exit,
+     has_persistent_identity, verifies_content, supports_ranges,
+     supports_delegation) is right in kind but under-specified in one place that
+     matters: "survives_process_exit" is not one boolean. BITS keeps *working*
+     with nobody attached; UWP keeps the *record* but ties resumption to attach;
+     WorkManager keeps the record and restarts your process to do the work;
+     Celery keeps the record only if acks_late is set. Those are four different
+     behaviours a caller must distinguish. Split it into
+     record_survives_process_exit / work_continues_unattended /
+     work_resumes_after_reboot.
+
+---------------------------------------------------------------------------
+9. WHAT IS UNVERIFIED HERE
+---------------------------------------------------------------------------
+  - BITS TakeOwnership privilege requirements (admin only? same-user peers?).
+  - Whether Android DownloadManager has any cross-package adoption path.
+  - iOS resume-data portability across OS versions and across app launches with
+    a different session identifier. Widely reported as fragile; not tested here.
+  - Whether nsurlsessiond continues transferring while the app is not merely
+    suspended but force-quit by the user (Apple's documented answer is that
+    user-force-quit stops background delivery until next launch; I did not
+    confirm this in this pass).
+  - Everything in section 5.2 about Windows named-mutex WAIT_ABANDONED is
+    well-known API behaviour but I did not re-read the docs in this pass.

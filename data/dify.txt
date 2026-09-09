@@ -1,0 +1,54 @@
+NAME
+Dify
+
+CATEGORY
+workflow/orchestration
+
+OFFICIAL SITE
+https://dify.ai (cloud: https://cloud.dify.ai, docs: https://docs.dify.ai)
+
+GITHUB REPO
+https://github.com/langgenius/dify
+
+LICENSE
+"Dify Open Source License" — a MODIFIED Apache 2.0 with added conditions (NOT OSI-approved). Key extra restrictions: (1) you may not use the source to operate a MULTI-TENANT service without written authorization (one tenant = one workspace); (2) you may not remove/alter the Dify LOGO/copyright in the frontend. All else follows Apache 2.0. Red flag: it is "source-available with a fork/enterprise twist", not standard OSS. (https://github.com/langgenius/dify/blob/main/LICENSE)
+
+WHAT IT DOES
+Open-source LLM application development platform: visual AI workflows, RAG pipelines, agents, model management, and observability, deployable cloud/self-hosted/VPC to go prototype-to-production.
+
+TECHNICAL ARCHITECTURE
+- Python (Flask + Celery task queue) API backend; Next.js/TypeScript web frontend; separate worker; `dify-agent` / `dify-agent-runtime` (Go) for sandboxed plugin/tool execution.
+- Storage: PostgreSQL + Redis + pluggable vector databases. Deployed via Docker Compose (or Kubernetes/Helm).
+- Workflow abstraction: a visual DAG of typed nodes (LLM, knowledge-retrieval, code, HTTP, tools, variables, branches, iterations, answer nodes) executed by an internal graph engine.
+- Model layer is an adapter system: hundreds of providers behind a common interface.
+
+MODEL FORMAT / ENGINES SUPPORTED
+Not a model runner — it orchestrates remote/local LLMs. Supports OpenAI, Anthropic, Google Gemini, Mistral, Llama, and any OpenAI-API-compatible endpoint; self-hosted via Ollama, Xinference, LocalAI, etc. Hundreds of providers (docs.dify.ai/getting-started/readme/model-providers). No local diffusion model loading itself.
+
+API / PROTOCOLS IT SPEAKS
+- REST "Backend-as-a-Service": every app exposes a Service API (chat/completion/chat-messages/audio/run) plus a management API.
+- Official SDKs (Python, Node, etc.); webhook nodes; plugin SDK.
+- Integrates observability: Langfuse, Opik (Comet), Arize Phoenix.
+
+KEY FEATURES
+- Visual Workflow canvas (DAG) with variables, conditionals, iteration, parallel branches.
+- RAG pipeline: document ingestion (PDF/PPT/etc.), chunking, embedding, retrieval, citation/attribution.
+- Agents: LLM function-calling or ReAct, with 50+ prebuilt tools (Google Search, DALL·E, Stable Diffusion, WolframAlpha).
+- Prompt IDE (compare models side-by-side), LLMOps logging/annotation, dataset management.
+- Model management (per-workspace keys/configs), observability dashboards.
+
+TOOL CALLING / MCP SUPPORT
+Yes. Native tool-calling for agents; plugin/tool ecosystem; MCP support via plugins (Dify supports MCP servers as tools). `dify-agent` runtime exists specifically for plugin/tool execution sandboxing.
+
+MULTIMODAL SUPPORT
+Partial. Supports multimodal LLMs (vision input), text-to-speech / ASR, and image/video generation AS TOOLS (e.g. DALL·E, Stable Diffusion node) — but it is an LLM-orchestration layer, not a native image/video generation pipeline. No first-class diffusion graph like ComfyUI.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- License is the biggest red flag: not standard open source; the multi-tenant + logo restrictions make some commercial/fork use require a paid license, and terms can be tightened/relaxed by the producer unilaterally (per contributor terms).
+- Self-hosting is heavy: many services (API, worker, web, Redis, Postgres, vector DB, sandbox) — resource-hungry for small teams.
+- Rapid API/changelog churn; migration pain between major versions.
+- Workflow canvas is less powerful/flexible than code frameworks (LangGraph) for complex control flow; some advanced needs require code nodes/plugins.
+- Plugin/MCP edges historically buggy; observability integrations add ops overhead.
+
+ABSTRACTION HINTS
+Strong separation of concerns: model providers are uniform adapters, tools/plugins are standardized, and the workflow is a typed node DAG — arguably the cleanest visual LLM-workflow abstraction alongside Flowise. Clean points: provider abstraction + RAG node pipeline. Monolith/leaky points: the app is a large service monolith (Flask+Celery+web) with the graph engine embedded; plugin sandboxing (Go agent) bolted on; the license itself is a governance leak.

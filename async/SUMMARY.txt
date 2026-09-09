@@ -1,0 +1,465 @@
+ASYNC / TASK / JOB SURVEY — SUMMARY
+===================================
+
+SCOPE: prior art for the Task/Job/Future abstraction — the async primitive that
+downloads, log flushes and model loads will sit on. The decisive requirement,
+which most language primitives do not meet: THE IMPLEMENTATION MAY LIVE IN
+ANOTHER PROCESS OR ON ANOTHER MACHINE, the handle must survive the app's exit and
+ideally a reboot, and another process must be able to find and adopt the job.
+ADDED: 2026-08-19. Facts and sources are in the four profiles in this directory:
+  longrunning-operation.txt   google.longrunning.Operation, studied closely
+  handoff-reclamation.txt     BITS, UWP, iOS, Android, leases, fd passing  <- key
+  language-primitives.txt     C#, Kotlin, Java, Rust, Go, JS, Python, Swift
+  durable-execution.txt       Temporal, Restate, DBOS, ADF, K8s, Celery,
+                              systemd/D-Bus, HTTP 202
+SIBLING: research/transfer/SUMMARY.txt (2026-08-18) reached a compatible
+conclusion from the transfer side. Agreements and three disagreements are in
+handoff-reclamation.txt §8.
+
+---------------------------------------------------------------------------
+TABLE 1 — THE SURVEY IN ONE PLACE
+---------------------------------------------------------------------------
+                        SURVIVES  SURVIVES  HAS        HAS          3rd PARTY
+  PRIMITIVE             PROCESS   REBOOT?   PROGRESS?  CANCEL?      CAN QUERY?
+                        EXIT?
+  -- in-process language primitives --
+  C# Task               no        no        out-of-band  yes, coop     no
+                                            (IProgress)
+  Kotlin Job/Deferred   no        no        NO         yes, coop     no
+  Java CompletableFut.  no        no        NO         nominal only  no
+                                                       (work runs on)
+  Java StructuredTask-  no        no        NO         yes, coop     no
+    Scope (preview)
+  Rust Future / tokio   no        no        NO         yes, by drop  no
+    JoinHandle                                         / abort()
+  Go (no future type)   no        no        NO         context only  no
+  JS Promise            no        no        NO         no (Abort-    no
+                                                       Controller
+                                                       alongside)
+  Python asyncio.Task   no        no        NO         yes, coop     no
+  Python concurrent.    no        no        NO         only if not   no
+    futures.Future                                     yet started
+  Swift Task            no        no        NO (Found-  yes, coop    no
+                                            ation Progress
+                                            is separate)
+  WinRT IAsyncOperation no        no        YES,       yes           no
+    WithProgress                            IN THE TYPE              (has an Id)
+
+  -- out-of-process and durable --
+  google.longrunning    YES       YES       only via   yes, best-    YES
+    .Operation                              opaque      effort        (Get + List)
+                                            metadata
+  Windows BITS          YES       YES       YES        yes (+Suspend YES, by GUID;
+                                            (GetProgress) /Resume)    TakeOwnership
+  UWP BackgroundTransfer YES      YES,      YES        yes           same app only
+                                  on attach                          (group-scoped)
+  iOS background        YES       YES       YES        yes, + resume single holder
+    URLSession                                          data blob     per identifier
+  Android WorkManager   YES       YES       YES        yes, incl.    same app only
+                        (record;             (setProgress, from a     (private DB)
+                        work runs            cleared at  notification)
+                        in your proc)        terminal)
+  Android Download-     YES       YES       YES        yes           same package
+    Manager                                 (cursor cols)
+  systemd unit + job    YES       unit yes, NO         yes           YES (D-Bus,
+    (D-Bus)                       job no    (state only) (CancelJob)   polkit-gated)
+  Kubernetes Job        YES       YES       counts     yes (delete   YES (RBAC)
+                                            only        or suspend)
+  Temporal              YES       YES       app-level  YES, two      YES (namespace
+                                            only        verbs         list/describe)
+  Celery + result       YES       YES       by         revoke,       YES, IF a
+    backend                       (broker   convention  best-effort   backend is
+                                  dependent) (collides                configured
+                                            with state)
+  HTTP 202 + Location   YES       depends   NOT        NOT           yes, if you
+    convention                    on server STANDARD-  STANDARDISED   have the URL
+                                            ISED
+
+  READ THE TWO HALVES AGAINST EACH OTHER. Eleven in-process primitives, eleven
+  NOs in the "survives process exit" column and eleven NOs in "third party can
+  query". Twelve out-of-process systems, twelve YESes. The line is not a spectrum
+  and there is no near miss on either side. Whatever we build is on the bottom
+  half of this table, and the top half is only the per-language BINDING.
+
+  Second thing to read off the table: of the twelve durable systems, the ones
+  with real progress are the four that transfer FILES (BITS, UWP, iOS, Android)
+  plus WorkManager. Every general-purpose job system — LRO, systemd, K8s,
+  Temporal, Celery, HTTP — declined to standardise progress. Progress got
+  standardised only where somebody had to draw a progress bar.
+
+---------------------------------------------------------------------------
+THE MINIMUM SET OF OPERATIONS
+---------------------------------------------------------------------------
+  Extracted, not designed. Each verb below exists because at least two
+  independent systems in this survey have it and at least one real failure mode
+  appears without it.
+
+  SUBMIT(descriptor, job_name) -> job_id
+      Returns an identity, not a value, not a channel, not a handle object.
+      Two-part identity: `job_name` is caller-chosen and stable across attempts;
+      `job_id` is assigned per attempt. WHY TWO: Temporal (Workflow Id + Run Id),
+      Kubernetes (name + UID), WorkManager (unique work name + UUID) and systemd
+      (unit name + job id) all converged on this independently. WHY THE CALLER
+      SUPPLIES ONE: LRO and BITS mint server-side, which leaves a crash window
+      between "work started" and "submitter persisted the id" in which the job is
+      orphaned and unfindable. iOS closes that window by letting the app choose
+      the session identifier; so should we. It also gives idempotent resubmit for
+      free (Temporal's id-reuse policy, Restate's idempotency keys).
+
+  GET(job_id) -> JobRecord
+      Poll. The only universally available observation mechanism; every durable
+      system in the survey has it and several have nothing else.
+
+  LIST(namespace_filter) -> []JobRecord
+      LRO has ListOperations; BITS has EnumJobs; K8s, Temporal, systemd and
+      WorkManager all have list. WHY IT IS MANDATORY AND NOT A CONVENIENCE:
+      METHOD §2 — the boundary exists so what crosses it can be seen. A handle
+      you can only query if you already hold the id gives no answer to "what is
+      this machine doing", which is the same complaint the logging survey found
+      unanswerable. Also required for orphan sweeps after a crash where the id
+      was lost. MUST be namespace-scoped: UWP's group-name requirement exists
+      precisely because a library that enumerates unscoped will adopt other
+      software's jobs.
+
+  ATTACH(job_id) -> JobRecord (+ subscription, where supported)
+      A distinct verb, because UWP makes it distinct and ties resumption to it:
+      GetCurrentDownloadsAsync + AttachAsync, with the documented failure that
+      un-attached operations "remain incomplete and continue to occupy
+      resources". Whether attach is REQUIRED for the work to progress is a real
+      difference between implementations (BITS: no; UWP: yes for post-reboot
+      resume; WorkManager: it restarts your process to do the work at all) and
+      must be a declared capability rather than a hidden behaviour.
+
+  CANCEL(job_id, mode) -> ack
+      Best-effort, asynchronous, confirmed by re-reading the record — LRO states
+      this outright and it is the only honest contract across a process boundary.
+      `mode` because every system that thought about it has two: Temporal cancel
+      vs terminate, K8s suspend vs delete, BITS Suspend vs Cancel. Minimum two
+      modes: GRACEFUL (ask it to stop and clean up) and ABANDON-AND-DELETE
+      (stop and destroy partial artifacts). Do NOT add a "forced kill" mode you
+      cannot implement; no system in Group A or B can compel a cooperative
+      executor to stop.
+
+  DETACH(job_id)  — "I am no longer interested; keep working"
+      LRO's DeleteOperation: "indicates that the client is no longer interested
+      in the operation result. It does NOT cancel the operation." This is the
+      verb an app needs when it is closing but the download should continue, and
+      it is the verb whose absence makes BITS dangerous to wrap naively — BITS
+      Cancel() DELETES transferred bytes, so a facade must never map detach onto
+      it.
+
+  FINALIZE(job_id) -> artifact   — two-phase completion
+      BITS (TRANSFERRED -> Complete() -> ACKNOWLEDGED) and iOS (delegate gets a
+      temp URL, must move the file synchronously or it is deleted) invented this
+      independently, for the same reason: the producing process and the consuming
+      process are different and can die at different times. There must be a
+      durable state meaning FINISHED BUT UNCLAIMED, and claiming must be an
+      explicit act. This is the single clearest thing LRO gets wrong for our use
+      case: `done=true, response=<value>` has nowhere to put it.
+
+  Optional-but-declared: SUSPEND / RESUME. BITS, K8s (spec.suspend) and iOS have
+  it; LRO, Temporal and Celery do not. Put it in the capability set, not in the
+  required core.
+
+  NOT IN THE INTERFACE, deliberately:
+    - No AWAIT/WAIT that blocks a caller thread as the primary mechanism. LRO's
+      WaitOperation is a long-poll optimisation whose timeout the server may
+      shorten; the loop is still mandatory. Each language binding may present a
+      blocking or async-idiomatic wrapper over GET; the protocol must not
+      assume one exists.
+    - No callback/subscription in the core protocol. systemd's documented
+      JobRemoved race — you must subscribe before you submit or you can miss the
+      completion — is what a signal-primary design costs. A durable pollable
+      record has no such race. Push, where an implementation supports it, is an
+      optimisation over the record, never the source of truth.
+    - No progress CALLBACK. C#'s IProgress binds progress to the caller's
+      lifetime, which is exactly the lifetime that fails.
+
+  THE RECORD (the actual deliverable — METHOD §6: define the record and the
+  protocol, let each language bind them its own way):
+
+    job_name        caller-chosen, stable across attempts, namespace-scoped
+    job_id          assigned per attempt
+    namespace       who owns this; the scope for LIST (UWP group-name lesson)
+    parent          job_name/id of the parent, if any     [Kotlin/Swift job tree]
+    state           enum, terminal states distinct: SUCCEEDED / FAILED /
+                    CANCELLED kept apart  [C# TaskStatus, Rust JoinError]
+                    plus a non-terminal TRANSFERRED/AWAITING-FINALIZE
+    cancel_requested_at   desired state, separate from observed state
+                    [K8s spec.suspend vs the Suspended condition]
+    created_at / started_at / updated_at / finished_at
+    last_progress_at      liveness. Without it every durable record in this
+                    survey can say "running" forever after its executor died.
+                    LRO's second serious omission.
+    progress        {completed, total_or_null, unit, message} — small, explicitly
+                    best-effort, explicitly NON-MONOTONIC (a resumed transfer
+                    that re-verifies its prefix legitimately goes backwards),
+                    and a SEPARATE FIELD FROM state. Celery's collision of
+                    progress into the state field is a live bug class.
+    error           structured: code + message + retryable + details
+                    [google.rpc.Status]
+    result          the artifact reference — a PATH or a URI, never bytes
+    spec            opaque, typed-by-annotation payload  [LRO metadata/Any +
+                    AIP-151 operation_info]. The download chunk manifest from
+                    research/transfer/ lives HERE, not in the job record proper.
+    resume_token    opaque, tagged with the producing implementation, never
+                    interpreted, never used across implementations  [METHOD §4;
+                    iOS resume data, aria2 bitfield, libtorrent resume blob]
+    capabilities    what this implementation actually guarantees (below)
+    owner / lease   who is executing it now, and how we will know if they died
+
+---------------------------------------------------------------------------
+WHAT A NAIVE `Future<T>` GETS WRONG — POINT BY POINT
+---------------------------------------------------------------------------
+  This is not hypothetical. Python's concurrent.futures.Future IS the naive
+  design stretched across a process boundary (ProcessPoolExecutor), and it
+  demonstrates every failure below in a shipped, widely used library.
+
+  1. IT IS A POINTER. A Future is a heap object in one address space. It cannot
+     be written to disk, sent over a socket, or reconstructed after a crash. The
+     decisive requirement is not "hard to add" to Future<T>; it is contradicted
+     by what Future<T> is. The replacement is an ID plus a store.
+
+  2. THE HANDLE'S LIFETIME IS THE CALLER'S LIFETIME. When the app exits, every
+     Future in it evaporates while the work continues somewhere else, unreachable
+     and unresumable. That is not a bug in any of the eleven primitives — it is
+     the correct behaviour for a heap object — which is why the fix cannot be a
+     better Future.
+
+  3. NO ENUMERATION. There is no `Future.all()`. After a crash you cannot ask
+     what was running. Every durable system has LIST; no language primitive does.
+
+  4. CANCELLATION IS EITHER A LIE OR A POINTER. Java's CompletableFuture.cancel
+     leaves the work running — the javadoc says mayInterruptIfRunning "has no
+     effect ... because interrupts are not used to control processing" — for
+     exactly the reason that afflicts us: the handle is not bound to the work.
+     Python's concurrent Future.cancel() returns False once the task has started,
+     because there is no channel to a running worker process. Cancellation must
+     be BY IDENTITY, ROUTED TO THE EXECUTOR (LRO's CancelOperation(name)), and
+     best-effort.
+
+  5. ONE CANCEL VERB. Future has no way to express "release my interest, keep
+     working" (LRO Delete) or "stop and delete the partial file" as distinct from
+     "stop". An app closing during a 40 GB download needs the first and Future
+     cannot say it.
+
+  6. NO PROGRESS. Six of eight languages have none at all, and the two that do
+     have it as a caller-supplied callback — bound to the caller's lifetime, the
+     one that fails. Across a swappable out-of-process implementation, the record
+     is the ONLY observability surface, so an interface with no progress field is
+     an interface that cannot be observed, which by METHOD §2 is not a boundary
+     worth drawing.
+
+  7. NO LIVENESS. `pending` and `the executor was SIGKILLed` are the same state.
+     A Future never has to solve this because if the process died the Future died
+     with it. A durable record must carry last_progress_at or an OS lock, or it
+     will assert "running" about a job that has been dead for a week.
+
+  8. COMPLETION IS A RETURN VALUE, SO THERE IS NO UNCLAIMED STATE. `T` is handed
+     to a caller who might not exist. BITS and iOS both had to invent a
+     finished-but-unclaimed state; Future<T> structurally cannot have one.
+
+  9. `T` IS THE WRONG PAYLOAD. 40 GB does not fit in T, and the writer is often a
+     different security principal than the reader (BITS writes as the service
+     account). The result is a path or a URI plus a verified digest.
+
+  10. IT PRETENDS IMPLEMENTATIONS ARE INTERCHANGEABLE. Future<T> has no place to
+      say "this one does not survive process exit". Callers must be able to
+      REQUIRE capabilities and be refused (METHOD §3 test 2 — a boundary that
+      cannot say no is a pipe). Minimum capability flags, and note the first
+      three are the split the transfer survey's single `survives_process_exit`
+      flag needs:
+        record_survives_process_exit
+        work_continues_unattended        (BITS yes; UWP needs attach; WorkManager
+                                          restarts your process)
+        work_resumes_after_reboot
+        third_party_can_query
+        supports_adoption / take_ownership
+        reports_progress
+        supports_suspend_resume
+        two_phase_completion             (does it need FINALIZE at all)
+
+---------------------------------------------------------------------------
+WHAT TO STEAL, AND FROM WHOM
+---------------------------------------------------------------------------
+  google.longrunning.Operation — THE SKELETON
+    * The whole idea: a durable job is a RECORD plus five verbs in an IDL, with
+      idiomatic bindings generated per language. It is shipped, cross-language,
+      and at scale. Do not re-litigate whether this is possible.
+    * A tiny record: name, metadata, done, oneof{error, response}. Resist growth.
+    * `metadata` as an opaque `Any` whose TYPE is declared by an annotation on
+      the producing method — generics restored at the method, not in the record.
+    * Cancel and Delete as separate verbs.
+    * Cancellation explicitly best-effort, confirmed by polling.
+    * ListOperations. Enumerability.
+    * DO NOT take: `done` as the only state (no unclaimed state, no cancelled-vs-
+      failed distinction), the absence of any liveness field, service-only-unique
+      names, or the refusal to define progress.
+
+  Windows BITS — THE COMPLETE OUT-OF-PROCESS MODEL
+    * GUID identity in a service-owned on-disk queue; any process may open it.
+    * Documented ownership transfer (TakeOwnership). Cross-process adoption is
+      not theoretical; it shipped in 2001.
+    * Two-phase completion: TRANSFERRED -> Complete() -> ACKNOWLEDGED, with
+      Cancel() as the destructive terminal. Steal this exactly.
+    * Out-of-process progress by polling the GUID, and SetNotifyCmdLine — a
+      completion hook that runs even though the submitter is gone.
+    * DO NOT take: Cancel()'s destructiveness as the only way to release a job.
+
+  Temporal — THE ORPHAN STORY
+    * Heartbeat-carries-checkpoint: one channel carrying liveness, progress, the
+      resume point, and cancellation delivery. A retried activity receives the
+      dead worker's last heartbeat details. For a 40 GB download that is
+      "resume at byte N of temp file P with etag E". This is the best single
+      mechanism in the survey.
+    * Workflow Id vs Run Id — the two-part identity.
+    * cancel vs terminate as separate, documented, differently-guaranteed verbs.
+
+  iOS background URLSession / UWP BackgroundTransfer — THE ADOPTION RITUAL
+    * Caller-chosen identifier, so reattachment does not depend on the submitter
+      having successfully persisted anything before it died.
+    * The documented startup ritual: enumerate incomplete work, then ATTACH each.
+    * Group/namespace scoping on enumeration, so a library does not adopt the
+      host application's jobs.
+    * Resume data as an opaque, serialisable, implementation-tagged token.
+
+  Kotlin coroutines / Swift structured concurrency — THE TREE
+    * parent/child with cancel-propagates-down, failure-propagates-up, and an
+      explicit opt-out edge (SupervisorJob, detached Task). Our app -> service ->
+      NAS chain is already a tree; put `parent` in the record and state the
+      propagation rule.
+
+  C# (and Go, and the DOM) — THE CANCELLATION SPLIT
+    * Separate the cancellation TRIGGER from the OBSERVER. Across processes this
+      becomes Cancel(job_id) at the interface and a native
+      CancellationToken/context/AbortSignal derived inside each implementation.
+      Three language communities converged on this after shipping the other way.
+
+  WinRT IAsync*WithProgress — THE EXISTENCE PROOF
+    * The only shipped cross-language async ABI that put PROGRESS IN THE TYPE and
+      an `Id` on the handle. Study its four-interface shape before designing
+      ours, and note the warning: even it did not cross a process boundary.
+
+  Kubernetes — DESIRED STATE VS OBSERVED STATE
+    * spec.suspend (what was asked) is a different field from the Suspended
+      condition (what is true), and the docs explicitly warn against reading the
+      first as the second. Our cancel_requested_at / state split is the same
+      thing and is required for an honest audit line.
+
+  systemd — THE UNIT/JOB SPLIT AND THE RACE
+    * Separate the durable addressable thing from the transient request to change
+      it. And the documented JobRemoved race is the argument for a pollable
+      durable record over an event/callback design.
+
+  Celery, negatively — DO NOT put progress and terminal state in one field.
+
+---------------------------------------------------------------------------
+THE HONEST WARNING SECTION
+---------------------------------------------------------------------------
+  WHAT CANNOT BE MADE UNIFORM ACROSS LANGUAGES
+
+  1. THE ASYNC CALLING CONVENTION ITSELF. Go has no future type and no coloured
+     functions; JS and Python have coloured async; Rust futures are inert and
+     poll-driven; C#/Kotlin/Swift tasks are hot; Java is mid-migration to virtual
+     threads with six previews of StructuredTaskScope behind it. There is no
+     shape that is idiomatic in all of these. This is METHOD §6's exact warning
+     and the reason the deliverable must be the RECORD AND THE PROTOCOL — the
+     per-language ergonomics are the binding author's business and must not be
+     specified.
+     (Convenient for us: the project is written in Go, which has no incumbent
+     future type to appease, and Go's idiom — an id, a store, functions taking a
+     context — is already the right shape.)
+
+  2. CANCELLATION SEMANTICS. Cooperative everywhere in-process, but the point
+     at which a cancel takes effect differs by orders of magnitude: Rust drops at
+     the next await with NO async cleanup possible; Kotlin/Python throw at the
+     next suspension point and cleanup runs; Java's CompletableFuture does not
+     stop the work at all; BITS transitions a state machine in a service. The
+     interface can promise only: the request is delivered, it is best-effort, and
+     the outcome is observed by re-reading the record. Any stronger promise is
+     unimplementable somewhere.
+
+  3. THE RESUMPTION TOKEN. iOS resume data, aria2's `.aria2` bitfield,
+     libtorrent's bencoded resume blob, BITS's internal queue state, Temporal's
+     heartbeat details. There is no chance of normalising these and no value in
+     trying. METHOD §4: carry verbatim, tag with the producer, declare any
+     projection lossy, refuse across implementations. Write it into the interface
+     AS A HOLE.
+
+  4. PROGRESS SEMANTICS BEYOND THE TRIPLE. bytes vs files vs steps vs pods vs
+     "indeterminate"; monotonic vs not; whether total is known; the cost of
+     producing it. Five serious systems (LRO, Temporal, K8s, systemd, HTTP) each
+     declined to standardise progress. Standardise {completed, total_or_null,
+     unit, message} and nothing more; everything richer goes in the opaque blob.
+
+  5. ERROR TAXONOMY. Beyond {code, message, retryable, details} the errors are
+     domain-specific and platform-specific (HRESULTs, errno, HTTP status, gRPC
+     codes). google.rpc.Status is the right amount of structure and it is
+     deliberately thin.
+
+  6. LIVE HANDOFF OF AN OPEN RESOURCE. SCM_RIGHTS has no Windows equivalent;
+     DuplicateHandle requires the source process to be alive and to act. So
+     "hand the open socket/file to the other process" cannot be in the interface.
+     The universal weaker form — durable descriptor + byte offset + verified
+     prefix, i.e. re-open rather than transfer — can be, and it is what the
+     transfer survey independently concluded (append-verify).
+
+  7. TIME AND DEADLINES. Wall clock across sleep, hibernate and reboot is a mess;
+     monotonic clocks do not survive reboot. A deadline expressed as a duration
+     and a deadline expressed as an instant are not interconvertible across a
+     suspend. Carry both, timestamp everything with wall clock, and do not
+     promise timeout precision.
+
+  WHERE A LOWEST-COMMON-DENOMINATOR INTERFACE BECOMES USELESS
+
+  a. IF IT DROPS PROGRESS because six of eight languages have none. Progress is
+     the only observability the caller can ever have across a process boundary,
+     and without it the boundary fails METHOD §3 test 1 — the audit line would
+     read "something is happening". Intersecting the language primitives is
+     exactly the wrong operation.
+
+  b. IF IT DROPS ADOPTION because only BITS has it. A facade that offers only
+     what all implementations support degrades to submit/poll/cancel, at which
+     point wrapping BITS actively DESTROYS the one capability that made BITS
+     worth adopting. Capabilities must be declarable and requestable, with an
+     explicit refusal when unavailable — METHOD §3 test 2.
+
+  c. IF IT DROPS TWO-PHASE COMPLETION because LRO and Temporal do not have it.
+     Then a crash between "download finished" and "app read the file" leaves a
+     file nobody owns and nobody deletes. Two independent OS vendors invented
+     this state because it is where crash-safety lives.
+
+  d. IF IT ADDS A GUARANTEE NOBODY CAN KEEP. Synchronous cancellation, monotonic
+     progress, exactly-once completion notification, or a `Future<T>` facade over
+     a durable job. Each looks like a convenience and each is a lie that will be
+     discovered in production instead of in a document (METHOD §4).
+
+  e. IF IT BECOMES A DOWNLOAD INTERFACE WITH EXTRA STEPS. The chunk manifest and
+     content hash the transfer survey (correctly) requires belong in the opaque
+     `spec`, not in the job record — otherwise log flushes and model loads cannot
+     use the same abstraction and there was no point generalising.
+
+  WHAT WOULD KILL THIS, STATED BEFORE THE DATA
+    If a survey of the implementations we actually intend to wrap — BITS, a plain
+    HTTP range download, an SMB copy, ComfyUI's queue, Ollama's pull, Lemonade —
+    shows that fewer than two of them expose a job identity that outlives the
+    submitting process, then there is no seam here: there is one implementation
+    (BITS) with a durable job model and a pile of things that are just function
+    calls, and METHOD §5's two-implementation rule is not met. In that case the
+    honest output is a Windows BITS wrapper and a note, not a cross-language
+    abstraction. Ollama's `pull` is a chunked JSON stream with no job id and is
+    the obvious first counterexample to check.
+
+  OPEN QUESTIONS THIS SURVEY COULD NOT SETTLE
+    - BITS TakeOwnership privilege requirements: admin-only, or peer-to-peer?
+    - Whether nsurlsessiond continues transferring after a USER force-quit (as
+      opposed to system termination). Apple's documented answer is believed to be
+      "no, until next launch"; not confirmed in this pass.
+    - Whether any Google API documents a canonical (endpoint, operation name)
+      URI form that would make an LRO handle self-describing. None found.
+    - Whether Android DownloadManager has any cross-package adoption path.
+    - Whether OS-held locks (flock / LockFileEx / abandoned mutex) are workable
+      as the liveness primitive across the specific set of processes this project
+      will span, including any that run as a service account or in a container.
+      This is the cheapest thing on the list to test and it decides whether we
+      need leases and fencing tokens at all locally.

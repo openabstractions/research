@@ -1,0 +1,26 @@
+OPENCODE
+=========
+
+CATEGORY: coding agent
+LICENSE: MIT
+
+WHAT IT IS
+  Open-source, model-agnostic AI coding agent in the terminal; client-server design so many UIs share one agent server.
+
+ARCHITECTURE / SEAMS
+  Most modular of the group: client-server core with pluggable clients (TUI, desktop, IDE, web). Context via LSP servers (diagnostics, go-to-def, symbols) + file search + MCP-provided context; rules via AGENTS.md. Tool execution via built-in tools (bash, edit, read, write, grep/glob, webfetch) plus full MCP client (stdio + remote HTTP/OAuth); tools are namespaced and gated by a permissions/policies system. Clean seams: providers (model abstraction), tools (built-in + MCP + custom), LSP (context), agents (orchestration), permissions (execution gate), plugins/SDK/ACP (extension).
+
+STINKS
+  - Fast-moving config/schema churn (opencode.jsonc)
+  - TUI instability; native Windows rough edges (WSL recommended)
+  - MCP servers can overflow context (token cost)
+  - Documentation gaps
+
+DONE GREAT
+  - Client-server split — strong reference architecture for one agent, many surfaces
+  - ACP (Agent Client Protocol) — acts as both client and server for other agents
+  - Model-agnostic by design (any provider incl. local Ollama/LM Studio)
+  - Permissions/policies as an explicit execution gate
+
+ABSTRACTION ANGLE
+  Occupies every layer cleanly (providers, tools, context, orchestration, permissions). Project context = LSP + search + AGENTS.md rules — a universal standard could absorb the LSP-attachment + rules seam as a context contract. Tool execution = MCP + namespaced tools + a permissions/policies gate, the gate being a seam worth standardizing. Its client-server + ACP design is the closest existing blueprint for a universal abstraction layer.

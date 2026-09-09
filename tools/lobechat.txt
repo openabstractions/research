@@ -1,0 +1,25 @@
+LOBECHAT
+========
+
+CATEGORY: frontend
+LICENSE: "LobeHub Community License" (Apache-2.0 base + commercial restrictions: paid license for derivative work; was MIT)
+
+WHAT IT IS
+  Extensible, high-performance chatbot web app/framework (now LobeHub) with function-calling plugins, agents, multimodal, self-hosted or Vercel.
+
+ARCHITECTURE / SEAMS
+  Next.js + TypeScript monorepo (pnpm workspaces: apps/ packages/ src/). Clean seams: packages/ split (core chat, provider/llm adapters, plugins, UI kits); the AI provider abstraction (unified interface over OpenAI/Anthropic/Google/etc.); plugin manifest/runtime; client-mode (browser-only PWA) vs server-mode (PostgreSQL/Drizzle, server auth). Monolith seams: Next.js couples API routes, auth, DB and rendering; provider logic scattered across packages.
+
+STINKS
+  - License change MIT → LobeHub Community License is a red flag; derivative commercial forks need paid license.
+  - Fast rename/scope shift (LobeChat → LobeHub); repo churn, API instability.
+  - Server mode requires PostgreSQL; client mode is stateless so team features need the DB path.
+  - Heavy Next.js/Ant Design frontend; large bundle; gaps vs OpenAI-native fidelity.
+
+DONE GREAT
+  - Clean packages/ boundary with a real provider-adapter layer — a ready-made seam.
+  - Client-mode vs server-mode split shows a clean frontend/backend seam that can be re-implemented.
+  - First-class function-calling plugin system + MCP client.
+
+ABSTRACTION ANGLE
+  Occupies the client layer (and capability/tooling via plugins); the provider abstraction is the piece worth standardizing. It implies a unified "model interface" but is missing a hosting/arbiter or compute-backend layer (browser mode talks straight to providers, keys in IndexedDB). What we'd extract: the provider-adapter interface and the plugin/manifest runtime.

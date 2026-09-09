@@ -1,0 +1,38 @@
+NAME
+Roo Code
+
+CATEGORY
+Coding agent (VS Code extension)
+
+OFFICIAL SITE
+https://roocode.com
+
+GITHUB REPO
+https://github.com/RooCodeInc/Roo-Code (archived May 15, 2026, read-only)
+
+LICENSE
+Apache 2.0 (© Roo Code, Inc.)
+
+WHAT IT DOES
+VS Code extension providing a "whole dev team" of AI agents via Modes (Code, Architect, Ask, Debug, Custom) — a fork of Cline.
+
+TECHNICAL ARCHITECTURE
+TypeScript VS Code extension (monorepo: src/, webview-ui/, packages/, apps/). A fork of Cline; same tool core (read/write/edit files, terminal, browser, MCP). Files via VS Code APIs; terminal via integrated terminal. Checkpoints for rollback; human approval or auto-approve. "Modes" are declarative personas = system prompt + tool-set restrictions. .rooignore excludes files; .roomodes defines modes.
+
+CONTEXT / PROJECT ABSTRACTION
+No persistent index/LSP/AST. Context comes from open files/selection/VS Code diagnostics + file-reading tools; modes scope what the model sees and which tools it can use. RAG/indexing not core.
+
+TOOL CALLING / MCP SUPPORT
+Native MCP client (per-mode MCP server tool groups); custom modes define tool sets; task orchestration mode; browser tool.
+
+PROVIDER SUPPORT
+Any model: Anthropic, OpenAI, Google Gemini, OpenRouter, AWS Bedrock, Vertex, Ollama/LM Studio (local), any OpenAI-compatible API.
+
+KEY FEATURES
+Modes (Code/Architect/Ask/Debug/Custom); custom modes; MCP; checkpoints; orchestrator mode; browser tool; multi-provider.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+Shut down May 15, 2026 — extension discontinued and repo archived (billing@roocode.com for users). Forked originally from Cline (fragmentation/merge-divergence pain); community continuation is ZooCode. Earlier pain points included token/cost usage and mode-config complexity. https://github.com/RooCodeInc/Roo-Code
+
+ABSTRACTION HINTS
+"Modes" are the clean seam: declarative persona + tool-set per mode (a reusable prompt/context/tool-scoping abstraction). MCP for tools; checkpoints for state. Since the project is archived, abstraction value is reference-only. Best seam worth studying: the Mode abstraction (persona + tool permissions).

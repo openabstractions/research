@@ -1,0 +1,23 @@
+LangGraph
+=========
+
+CATEGORY: workflow/orchestration
+LICENSE: MIT
+
+WHAT IT IS
+  Low-level orchestration framework for stateful, durable, controllable agents: a graph of nodes and edges with explicit typed state, checkpointing, and human-in-the-loop.
+
+ARCHITECTURE / SEAMS
+  StateGraph model (inspired by Pregel/NetworkX): nodes are functions, edges (normal + conditional) define transitions, shared state is a typed schema with reducers (e.g. append-only message lists). Durable execution via a checkpointer (resume/time-travel). Can run standalone without LangChain. Clean and principled but deliberately low-level; higher ergonomics deferred to Deep Agents/Platform.
+
+STINKS
+  - Steeper learning curve: "low-level" boilerplate; reducers/channels/checkpointers confuse newcomers.
+  - Fast-moving API with breaking changes; no batteries-included UI (Studio/Platform are paid upsell).
+  - Overkill for simple RAG/chains.
+
+DONE GREAT
+  - Explicit typed state + reducers + nodes/edges gives deterministic, inspectable control flow — the reference model for "stateful agent = state machine".
+  - Durable checkpointing (persist/resume through failures) is principled and rare.
+
+ABSTRACTION ANGLE
+  The most rigorous graph abstraction in the LLM space. Its state/reducer + checkpoint model is the reference "stateful agent = state machine" standard. For a universal standard, this is the strongest candidate for the orchestration/state layer — typed state, reducers, and durable execution are exactly the seams a minimal abstraction standard should absorb, decoupled from LangChain's component interfaces.

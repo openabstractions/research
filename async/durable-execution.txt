@@ -1,0 +1,289 @@
+DURABLE EXECUTION ENGINES AND OUT-OF-PROCESS JOB SYSTEMS
+=========================================================
+
+CATEGORY: prior art for the Task/Job/Future abstraction (out-of-process group)
+ADDED: 2026-08-19
+STATUS: these are the systems that actually solve "the work outlives the process".
+  None of them is adoptable for this project as a dependency — every one either
+  requires a server, a broker, or a cluster. What is adoptable is their answer to
+  ONE question, which they answer differently and consistently enough to extract
+  from: WHAT UNIT GETS PERSISTED, and what happens to work orphaned by SIGKILL.
+
+THE ORGANISING QUESTION
+  A worker is SIGKILLed mid-job. There is no shutdown hook, no flush, no final
+  status write. What does the system have, five seconds later, that lets anyone
+  else do anything useful? The answers cluster into three families.
+
+---------------------------------------------------------------------------
+FAMILY 1 — PERSIST THE JOB DESCRIPTOR ONLY. RE-RUN FROM SCRATCH.
+---------------------------------------------------------------------------
+
+KUBERNETES JOB
+  Sources: kubernetes.io "Jobs" concept page and batch/v1 Job API reference;
+  KEP-2232 "Suspend Job". Fetched 2026-08-19.
+  - Unit persisted: the Job SPEC (a desired state), in etcd. Nothing about how
+    far a Pod got. The Pod is cattle.
+  - Identity: namespace/name plus a UID. Cluster-global, stable, third-party
+    readable by anyone with RBAC. This is a good identity design.
+  - Status: .status.active / .succeeded / .failed are COUNTS OF PODS, plus
+    conditions (Complete, Failed, Suspended, FailureTarget). There is no percent,
+    no bytes, no step. For an indexed Job you get completedIndexes — the closest
+    thing to progress in the whole system, and it exists only because the work
+    was pre-partitioned into countable units. That is the general lesson: you get
+    progress for free exactly when the work is a countable set of units declared
+    up front.
+  - Orphan handling: a killed Pod is simply a failed Pod; the controller starts
+    another, up to backoffLimit. There is no resumption — the new Pod starts at
+    zero. podFailurePolicy (GA in recent releases) lets you classify exit codes
+    so some failures do not count against the budget.
+  - Cancellation from outside: delete the Job (with propagationPolicy), or set
+    .spec.suspend=true, which stops creating/restarts pods and raises the
+    Suspended condition. The docs warn not to infer suspension from the spec
+    field because the controller may not have observed it yet — a nice example of
+    DESIRED STATE VS OBSERVED STATE being genuinely different fields, which our
+    record will also need (cancel_requested_at vs terminal state).
+  - Handoff: none. There is no notion of one executor taking over another's
+    in-flight pod.
+  Verdict: excellent identity and enumerability, zero progress, zero resumption.
+  Right for idempotent batch work; wrong for a 40 GB download.
+
+CELERY (and the whole broker-queue family: Sidekiq, RQ, Resque, SQS consumers)
+  Sources: docs.celeryq.dev (celery.result, celery.states, SQS broker page);
+  celery.school "Custom Celery Task States"; celery/celery discussion #9482.
+  Fetched 2026-08-19.
+  - Unit persisted: the MESSAGE in the broker, plus optionally a result row in a
+    result backend. The task's internal position is not persisted by the
+    framework.
+  - Identity: a task_id (UUID), caller-supplyable. Any process with the id and
+    access to the result backend can construct AsyncResult(task_id) and read
+    state — so third-party query DOES work, provided a result backend is
+    configured. Without a backend, the id is write-only. That optionality is a
+    trap worth noting: the same API silently means two different things.
+  - Progress: by convention, not by design. update_state(state='PROGRESS',
+    meta={...}) writes a CUSTOM state into the result backend. The docs are clear
+    that custom states are transient and get overwritten by the built-in terminal
+    states, and there is a standing bug class (discussion #9482) where a task that
+    finishes leaves state stuck at PROGRESS. So: progress and terminal state
+    share one field, and they fight. Do not do that. Progress must be a separate
+    field from state.
+  - Orphan handling: this is the interesting part, and it is a LEASE (see
+    handoff-reclamation.txt §5.1). With task_acks_late=True the message is not
+    acknowledged until the task finishes, so a SIGKILLed worker's message is
+    redelivered — by AMQP when the connection drops, or, on Redis/SQS, after a
+    VISIBILITY TIMEOUT elapses. The documented failure mode: a task that runs
+    longer than visibility_timeout is redelivered and executed AGAIN while the
+    first is still running, "and again in a loop". By default acks_late is OFF,
+    meaning the default configuration LOSES tasks on worker death.
+    Sidekiq's answer (Pro's super_fetch) is structurally different and better:
+    RPOPLPUSH the job onto a private working list named after the process, so
+    orphans are identifiable by owner rather than by clock, and a separate
+    reaper checks whether that process still exists.
+  - Cancellation: revoke(task_id), broadcast to all workers; terminate=True kills
+    the child process. Revocation of an already-running task is best-effort and
+    the revoked set is in-memory unless a persistent revokes file is configured.
+  Verdict: the id, the third-party query, and the caller-suppliable id are right.
+  The state/progress collision and the timeout-based lease are the two mistakes
+  to avoid, and both are avoidable.
+
+---------------------------------------------------------------------------
+FAMILY 2 — PERSIST EVERY COMPLETED STEP. REPLAY TO GET BACK.
+---------------------------------------------------------------------------
+  This is "durable execution" proper. The common claim: your code is ordinary
+  code, and the runtime makes it crash-proof by recording the OUTCOME OF EVERY
+  SIDE-EFFECTING STEP and, after a crash, re-running the function from the top
+  while serving already-recorded steps from the log instead of re-executing them.
+
+TEMPORAL
+  Sources: docs.temporal.io (Workflow Execution overview; Workflow Id and Run Id;
+  Activity Execution; Cancellation pages for Go/.NET/Python). Fetched 2026-08-19.
+  - Unit persisted: the EVENT HISTORY of a Workflow Execution, server-side.
+  - Identity: a two-part id, and the split is worth stealing. The WORKFLOW ID is
+    "a customizable, application-level identifier ... meant to be a
+    business-process identifier, such as customer identifier or order
+    identifier", unique among open executions in a namespace. The RUN ID
+    identifies one attempt; a chain of runs shares a Workflow Id. So: a stable
+    caller-chosen name for the thing, plus a system-assigned id for this
+    particular execution of it. Our record needs both — the caller wants
+    "download of model X" to be one job across retries, the operator wants to
+    talk about the specific attempt that failed.
+  - Query from outside: Queries (read-only, synchronous, served by a live
+    worker), Signals (asynchronous input, recorded in history as
+    WorkflowExecutionSignaled and therefore durable — replayed if the worker
+    crashes before processing), and Updates (synchronous, validated, durable).
+    Plus DescribeWorkflowExecution and a list/search API over the whole
+    namespace. Note the split: durable messages go through history; live
+    inspection needs a running worker. A record-only design cannot answer "what
+    is it doing right now" without an executor attached — a constraint that will
+    apply to us too.
+  - Progress: not a first-class field. Two idioms: query the workflow for a
+    progress value it maintains in local state, or use activity heartbeat
+    details. Both require a live worker.
+  - Orphan handling — THE BEST MECHANISM IN THIS WHOLE SURVEY: Activity
+    heartbeats. An activity calls RecordHeartbeat(details); the server tracks the
+    last heartbeat against a heartbeat timeout; if the worker dies, the activity
+    times out and is retried, AND THE NEW ATTEMPT IS HANDED THE LAST HEARTBEAT
+    DETAILS. One channel carries liveness, progress, and the resume checkpoint.
+    Cancellation is delivered on the same channel — Temporal's docs state that
+    "Activities must Heartbeat to receive the Cancellation request", and that
+    cancelling an activity requires it to heartbeat with a heartbeat timeout set.
+    For a 40 GB download the heartbeat details are literally "bytes 12.3 GB, temp
+    file at P, etag E" and a new worker resumes from there. This is the design to
+    copy for our resume-after-crash story.
+  - Cancellation vs termination is an explicit, documented distinction: "Cancel
+    for graceful stops; terminate for forceful stops"; termination "forcefully
+    and immediately stops the Workflow Execution, and the Workflow code gets no
+    chance to handle termination". Two verbs, because one is a request and one is
+    a demand, and both are needed. Compare LRO, which has only the request.
+  - Handoff: retries move an activity to a different worker with the checkpoint,
+    which IS mid-flight handoff between executors of the same implementation. It
+    is NOT handoff between different implementations — the heartbeat details are
+    opaque and only meaningful to the same activity code.
+
+RESTATE / DBOS / AZURE DURABLE FUNCTIONS — the same idea, three storage choices
+  Sources: restate.dev docs; dbos.dev "Postgres-backed Durable Workflow
+  Execution"; learn.microsoft.com "Durable Orchestrations Overview". Fetched
+  2026-08-19; the DBOS/Restate comparisons come partly from secondary blog
+  sources and should be treated as HIGH-LEVEL-ACCURATE, DETAIL-UNVERIFIED.
+  - Restate: a per-invocation JOURNAL in its own log-structured server. Each
+    invocation has an INVOCATION ID; ctx.run() steps are journalled; on recovery
+    the journal is replayed and completed work is skipped. Also has idempotency
+    keys, durable timers, and "awakeables" — a durable promise that an EXTERNAL
+    party resolves by id. Awakeables are notable for us: a first-class,
+    externally-completable future with a persistent id is exactly the primitive
+    "an app waits for a job that a different process will finish" needs.
+  - DBOS: checkpoints go into ORDINARY POSTGRES TABLES, in the same transaction
+    as the application's own writes. No separate orchestrator. This is the
+    architecturally cheapest variant and the relevant lesson is that durable
+    execution needs a transactional store, not a cluster — the machinery is
+    smaller than Temporal's marketing suggests.
+  - Azure Durable Functions: event sourcing over an orchestration history in
+    Azure Storage; on replay, "if an activity function completed previously, its
+    result is returned from memory, and it is not re-executed". The orchestrator
+    function must be DETERMINISTIC, which is the tax every replay-based system
+    charges.
+  Verdict for us: the replay model is the wrong shape. It requires the work to be
+  re-entrant code under the engine's control. Our implementations are BITS, a
+  CLI, a NAS mount, someone else's HTTP server — code we do not own and cannot
+  replay. What transfers is not the model but two of its parts: the durable
+  externally-resolvable promise (Restate awakeables) and the checkpoint-carried-
+  on-the-liveness-channel (Temporal heartbeat details).
+
+---------------------------------------------------------------------------
+FAMILY 3 — THE OS ALREADY HAS A JOB SYSTEM
+---------------------------------------------------------------------------
+
+systemd JOBS OVER D-BUS
+  Sources: org.freedesktop.systemd1(5) man page (Debian/Ubuntu manpages);
+  utam0k.jp on StartTransientUnit job completion. Fetched 2026-08-19.
+  - Two different objects, and conflating them is the classic mistake:
+      a UNIT is the durable thing (a service, a mount, a scope). It persists
+      across the client's death and is enumerable via ListUnits.
+      a JOB is a transient queued state CHANGE to a unit (start/stop/restart).
+      StartUnit() "enqueues a start job and possibly depending jobs" and returns
+      the new job's object path.
+  - Job identity: a numeric job id plus a D-Bus object path. Jobs are short-lived
+    — the job disappears when the transition completes; only the unit remains.
+    The result is delivered as a JobRemoved signal carrying the id, the path, the
+    unit name, and a result string, one of "done", "canceled", "timeout",
+    "failed", "dependency", "skipped".
+  - THE RACE, documented in the man page, is instructive: to observe a job's
+    outcome you must subscribe to JobRemoved BEFORE calling StartUnit and filter
+    by the returned job path, because the job can complete before your reply is
+    processed. Any submit-then-watch API has this race. LRO avoids it by making
+    the operation a durable pollable resource rather than an event. That is a
+    strong argument for the durable-record design over a signal/callback design.
+  - Third-party query: yes, that is what D-Bus is for; ListJobs, ListUnits, and
+    per-unit properties, subject to polkit authorisation. Cancellation from
+    outside: CancelJob(id), or StopUnit.
+  - Progress: none. Not even a hint. systemd's model is "the unit is
+    activating/active/failed" — a state, never a fraction.
+  - StartTransientUnit creates a unit on the fly that is "released as soon as it
+    is not running or referenced anymore or the system is rebooted". So the
+    durable-across-reboot thing is a unit FILE on disk; transient units are not
+    that. Useful distinction: our jobs need to say which they are.
+  Verdict: the unit/job split is the right idea and we should mirror it — the
+  durable, enumerable, addressable thing (a JOB in our vocabulary) is separate
+  from the transient request to change it (submit/cancel/pause). systemd's
+  weakness is that its durable thing has no progress and its job has no life.
+
+HTTP 202 + Location POLLING — the REST convention
+  Sources: RFC 9110 §15.3.3 (202 Accepted); RFC 7240 (Prefer header,
+  respond-async, wait); draft-wright-http-progress-01 "Reporting Progress of
+  Long-Running Operations in HTTP"; restfulapi.net. Fetched 2026-08-19.
+  - The convention, which is a convention and not a standard: POST the work,
+    receive 202 Accepted with a Location header pointing at a STATUS MONITOR
+    resource, GET that resource until it reports completion, then follow to the
+    result. RFC 9110 says the 202 representation "should ... include a pointer
+    to a status monitor that can provide the user with an estimate of when the
+    request will be fulfilled". Retry-After is the polling-interval hint.
+    RFC 7240 adds `Prefer: respond-async` (please background this) and
+    `Prefer: wait=n` (I will hold the connection for n seconds first) — the same
+    shape as LRO's WaitOperation.
+  - What is standardised: the status code, the Location header, Retry-After, the
+    Prefer tokens. WHAT IS NOT STANDARDISED: the representation of the status
+    monitor. There is no interoperable JSON body, no state vocabulary, no
+    progress field, no cancel verb (DELETE on the monitor is a common but
+    unspecified convention), and no way for a generic client to know whether the
+    monitor URL survives a server restart.
+  - draft-wright-http-progress (individual draft; NOT an adopted working-group
+    document — treat as UNCERTAIN and non-normative) proposes 1xx informational
+    responses to report progress on the original connection, which is orthogonal:
+    it keeps the connection, which is exactly what we cannot rely on.
+  - There is also draft-ratnawat-httpapi-async-problem-details (individual draft)
+    proposing RFC 9457 problem-details for async job failures.
+  Verdict: HTTP gave us the SHAPE (submit -> 202 + id-as-URL -> poll -> result)
+  and refused to give us the RECORD. Which is precisely the gap this project
+  exists to fill, and it is the strongest evidence that the gap is real: the
+  most widely implemented long-running-job pattern in software has been in use
+  for 25 years with no interoperable status representation. Google had to invent
+  google.longrunning.Operation to fix it for themselves, and Microsoft, Apple and
+  Android each invented their own instead of using it.
+
+---------------------------------------------------------------------------
+CROSS-CUTTING FINDINGS
+---------------------------------------------------------------------------
+  1. UNIT PERSISTED, ranked by usefulness for a 40 GB download:
+       step-checkpoint carried on the liveness channel  Temporal heartbeat  BEST
+       step journal / event history                     Temporal, Restate, ADF
+       artifact + sidecar offset map                    aria2, libtorrent, BITS
+       message + optional result row                    Celery, Sidekiq, SQS
+       desired-state spec only                          Kubernetes Job     WORST
+     Note that the best and the third-best are the ones that let you RESUME
+     rather than RE-RUN, and resumption is non-negotiable at 40 GB.
+
+  2. TWO-PART IDENTITY IS THE CONSENSUS, arrived at independently:
+       Temporal   Workflow Id (caller-chosen, business-meaningful) + Run Id
+       WorkManager unique work name (caller-chosen) + UUID
+       Kubernetes name (caller-chosen) + UID
+       systemd    unit name (stable) + job id (per-transition)
+       Celery     task_id caller-suppliable, plus retries get new ids
+     Four independent systems: a stable caller-chosen name for the WORK, and a
+     system-assigned id for the ATTEMPT. LRO has only the second. Adopt both.
+
+  3. ORPHAN RECLAMATION IS ALWAYS ONE OF THREE, and every system picks one:
+       (a) lease/visibility timeout    Celery, SQS, K8s Lease, Temporal timeouts
+       (b) owner-tagged work list + reaper   Sidekiq super_fetch
+       (c) re-run from a durable spec  Kubernetes Job, replay engines
+     Nobody uses OS-held locks, because all of these are distributed systems
+     where the reclaimer is on a different machine. WE ARE NOT. Locally,
+     flock/LockFileEx gives exact orphan detection with no timeout guessing —
+     see handoff-reclamation.txt §5.2. This is a place where the distributed-
+     systems prior art is worse than what we can do, and copying it would be
+     cargo cult.
+
+  4. NOBODY STANDARDISED PROGRESS. Temporal: application's problem. K8s: pod
+     counts. Celery: a custom state that collides with the terminal state.
+     systemd: nothing. LRO: opaque per-service metadata. HTTP: unspecified body.
+     Five serious systems, five refusals. Either progress genuinely cannot be
+     normalised, or nobody with the standing to standardise it needed it
+     cross-vendor. Our case is the second — a facade over BITS + a CLI + a NAS
+     has exactly the cross-vendor need those systems did not. But the refusals
+     are a warning: keep the standardised part small (see SUMMARY) and expect
+     the rich part to stay opaque.
+
+  5. CANCELLATION IS TWO VERBS, NOT ONE, wherever it was thought about
+     carefully. Temporal: cancel (graceful) vs terminate (forced). LRO: cancel
+     (stop) vs delete (disinterest). K8s: suspend vs delete. BITS: Suspend vs
+     Cancel, plus a Complete that is the non-destructive terminal. Only the
+     language primitives have a single `cancel()`, and that is because
+     in-process there is nobody else's interest to release.

@@ -1,0 +1,25 @@
+ONNX RUNTIME
+===========
+
+CATEGORY: runtime
+LICENSE: MIT (ORT); ONNX format/spec itself is Apache-2.0 (Linux Foundation AI & Data)
+
+WHAT IT IS
+  Cross-platform inference/training accelerator that executes models serialized in the framework-neutral ONNX format across CPU/GPU/NPU/mobile/web.
+
+ARCHITECTURE / SEAMS
+  C++ core parses the ONNX graph, applies graph optimizations (fusion, constant folding), then partitions into subgraphs dispatched to pluggable "Execution Providers" (CUDA, TensorRT, OpenVINO, DirectML, CoreML, QNN, WebGPU, XNNPACK...). Seam = a stable C API (OrtApi) + the EP registration interface; each EP is a vendor shared library. Consumes ONNX (protobuf graph + operator sets); defines its own .ort flattened edge format. Language bindings: Python/C#/C++/Java/JS/Obj-C/Rust.
+
+STINKS
+  - ONNX is a lossy, lowest-common-denominator format: exotic/dynamic ops fail to export or need custom ops.
+  - Operator-set versioning + uneven EP op coverage cause silent CPU fallback or errors — portability is only partially true.
+  - LLM serving is second-tier vs vLLM/TensorRT-LLM; GenAI API is newer/less mature.
+  - Telemetry on by default; huge hard-to-build monorepo.
+
+DONE GREAT
+  - Execution Providers are a textbook plugin abstraction: one canonical in-memory graph/memory model + a narrow stable backend interface.
+  - Decoupled model representation (framework-neutral graph) from execution (ORT + EPs), enabling broad hardware/OS embedding (Office, Azure, WinML, Edge).
+  - Governance split: interchange format standardized under a foundation (Apache-2.0), runtime kept permissively MIT for maximal embedding.
+
+ABSTRACTION ANGLE
+  The winning move was splitting the interchange layer (a stable canonical representation) from execution, with vendor backends plugging into one narrow interface. The failure mode was an under-specified, version-churning format with uneven backend coverage. For a universal abstraction: freeze a single canonical in-memory representation, keep the backend interface tiny and stable, and govern the interchange schema under a neutral foundation while licensing the reference implementation permissively.

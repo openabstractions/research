@@ -1,0 +1,73 @@
+SCHEDULING + GPU ORCHESTRATION (Kubernetes layer)
+================================================
+
+Core abstraction: Kubernetes exposes GPUs as schedulable resources via the Device
+Plugin framework (extended resources). NVIDIA ships the whole stack as the GPU
+Operator.
+
+NVIDIA GPU Operator (https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/)
+- An operator that automates ALL the software a GPU node needs:
+  - NVIDIA driver (containerized driver)
+  - nvidia-container-toolkit (runtime hook to mount GPUs into containers)
+  - k8s-device-plugin (advertises nvidia.com/gpu)
+  - gpu-feature-discovery (GFD) - auto-labels nodes with GPU model/count/MIG config
+  - DCGM + DCGM-Exporter (GPU telemetry -> Prometheus)
+  - MIG Manager, vGPU manager, GPUDirect RDMA/Storage, etc.
+- You ask for a GPU with `resources.limits: nvidia.com/gpu: 1`.
+
+GPU sharing mechanisms (ordered by isolation strength):
+1. MIG (Multi-Instance GPU) - HARDWARE partition of a single GPU into fixed-size
+   slices (e.g. A100 into 7x "1g.5gb" slices). Memory + fault isolation at the
+   hardware level. Only on Ampere+. Best for predictable small workloads.
+   Sources: https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/gpu-operator-mig.html
+2. Time-slicing - SOFTWARE multiplexing: device plugin advertises N "replicas" per
+   GPU (oversubscription). NO memory/fault isolation; the GPU just round-robins
+   processes. Good for dev/bursty, bad for hard latency.
+   Source: https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/gpu-sharing.html
+3. vGPU - vendor virtualization (split GPU across VMs); used in enterprise/VDI.
+
+Key insight for an abstraction: time-slicing and MIG are NOT the same thing as the
+engine-level batching. Engine continuous-batching multiplexes many requests on ONE
+GPU; MIG/time-slicing multiplexes many *processes/pods* on one physical GPU. A smart
+system combines: few large GPUs each running one engine instance with continuous
+batching is almost always better than many tiny MIG slices, EXCEPT for tenant
+isolation / noisy-neighbor guarantees.
+
+KServe (https://github.com/kserve/kserve)
+- CNCF standard serverless inference platform on Kubernetes. CRD = InferenceService.
+- Two modes: Raw Deployment (lightweight) or Knative (serverless: scale-to-zero +
+  request-based autoscaling, canary).
+- GenAI support: vLLM + llm-d backends, OpenAI-compatible protocol, model caching,
+  KV cache offload, request-based autoscaling tuned for LLM patterns.
+- ModelMesh option for high-density / frequently-changing model serving (many models
+  packed per node).
+
+Kubeflow
+- Umbrella ML platform on k8s; KServe is its serving add-on. Provides training
+  (Kubeflow Training Operator/PyTorchJob), pipelines, Katib (HPO), notebooks.
+- Source: https://www.kubeflow.org/
+
+LLM-workload-specific orchestration concerns:
+- LLM autoscaling is NOT CPU autoscaling: the bottleneck is GPU memory (KV cache +
+  weights) and tokens/s, not request rate. Autoscalers should scale on
+  - concurrent requests in queue / queue depth
+  - GPU utilization AND GPU memory pressure
+  - time-to-first-token / tokens-per-second SLOs
+- Scale-to-zero is often NOT used for LLMs because cold start (load weights) is tens
+  of seconds to minutes; instead providers keep warm pools and use model-cache-aware
+  scheduling (route to a node that already has weights in RAM/disk).
+- GPU is a "sticky" / pinning resource: you cannot binpack LLM pods freely; a 70B
+  model needs e.g. 2-4 full GPUs. Schedulers use gang scheduling (all-or-nothing for
+  multi-GPU) and topology awareness (NVLink/NVSwitch for TP; DGX/NVL72 racks).
+- Common operator layer: NVIDIA Dynamo (datacenter-scale distributed inference
+  scheduling on top of TRT-LLM/vLLM/SGLang) - https://github.com/ai-dynamo/dynamo
+- Autoscaling tooling: KEDA with Prometheus/GPU metrics, HPA, Cluster Autoscaler for
+  node scale; Karpenter for fast GPU node provisioning.
+
+Practical GPU placement rules an abstraction should encode:
+- tensor-parallel jobs must be co-located on NVLink-connected GPUs on one node
+  (or a single NVL72 rack); never split TP across network.
+- pipeline-parallel / data-parallel / expert-parallel can span nodes but pay for
+  interconnect (NVLink > InfiniBand/RoCE > plain ethernet).
+- weights-loading time dominates cold start => prefer warm nodes, cache on local
+  NVMe or host RAM, and pre-pull models to a registry before scale-out.

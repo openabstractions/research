@@ -1,0 +1,56 @@
+NAME
+vLLM
+
+CATEGORY
+Local inference engine / model runner (high-throughput production serving engine)
+
+OFFICIAL SITE
+https://docs.vllm.ai / https://vllm.ai
+
+GITHUB REPO
+https://github.com/vllm-project/vllm
+
+LICENSE
+Apache-2.0
+
+WHAT IT DOES
+High-throughput, memory-efficient LLM inference and serving engine designed for production GPU servers; pioneered PagedAttention and continuous batching to maximize tokens/sec and GPU utilization for concurrent requests.
+
+TECHNICAL ARCHITECTURE
+- Written primarily in Python (torch) with performance-critical CUDA/HIP/Triton kernels in C++/CUDA (`csrc/`), plus an emerging Rust layer (`rust/`, `build_rust.sh`) for parts of the serving stack.
+- Core innovations: PagedAttention (virtual memory for KV cache), continuous batching, chunked prefill, prefix caching, piecewise/full CUDA graphs, speculative decoding, disaggregated prefill/decode/encode.
+- Runs Hugging Face Transformers models directly (200+ architectures) via a model-registry abstraction; scheduler + worker (Ray-optional) manage GPU KV cache and memory.
+- Quantization: FP8, MXFP8/MXFP4, NVFP4, INT8, INT4, GPTQ/AWQ, GGUF, compressed-tensors, ModelOpt, TorchAO; multi-LoRA; tensor/pipeline/data/expert/context parallelism.
+
+API / PROTOCOLS IT SPEAKS
+- OpenAI-compatible REST server (/v1/chat/completions, /v1/completions, /v1/embeddings, /v1/models), plus Anthropic Messages API compatibility and a gRPC server.
+- Offline engine API for embedding directly in Python (`LLM` class, `AsyncLLMEngine`).
+
+KEY FEATURES
+- Best-in-class serving throughput and GPU memory efficiency; multi-GPU and distributed (tensor/pipeline/expert/context parallelism).
+- Huge hardware support: NVIDIA, AMD (ROCm), Intel (XPU/GPU/CPU), Google TPU, Intel Gaudi, IBM Spyre, Huawei Ascend, Apple Silicon, MetaX, Rebellions NPU, ARM/PPC CPUs.
+- Structured output (xgrammar/guidance), tool calling + reasoning parsers, speculative decoding, multi-LoRA, prefix caching, GGUF loading.
+- 200+ model families: decoder-only LLMs, MoE, hybrid/Mamba, multimodal (LLaVA/Qwen-VL/Pixtral), embeddings/rerank/classification.
+
+MODEL DOWNLOAD MECHANISM
+- No model registry. Loads models by Hugging Face repo ID (auto-downloads via HF Hub), local paths, or GGUF files. Formats: Safetensors (primary), PyTorch checkpoints, GGUF. No built-in "pull/list" CLI like Ollama (relies on HF).
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- Heavy install/build (compiled CUDA kernels, big Python dep tree); version-pinned torch/CUDA compatibility is a frequent install pain point.
+- Requires a GPU (or substantial CPU) to shine; overkill and awkward for small/local single-user use vs Ollama/LM Studio.
+- Fast-moving API and frequent breaking changes/regressions across releases; large issue count (2k+ open) with many model-specific breakages.
+- Memory/throughput tuning is nontrivial (KV cache, chunked prefill, parallelism flags); not a "just works" tool.
+- Python/GIL and scheduling complexity; some features require Ray for multi-node.
+
+TOOL CALLING / MCP SUPPORT
+- Tool calling supported (OpenAI-compatible tools) with reasoning parsers; structured/guided output via xgrammar or guidance. Strong for serving LLMs that do tool calls.
+- MCP: no native MCP host support — it's a serving engine, not an agent framework; consumed by agent frameworks via its OpenAI-compat API.
+
+MULTIMODAL SUPPORT
+- Strong multimodal: vision (LLaVA, Qwen-VL, Pixtral, and others), plus audio/embedding models; supports VLM input with image tensors over the OpenAI-compat API. No image-gen/TTS (not its scope).
+
+RESOURCE MANAGEMENT
+- Best-in-class: PagedAttention virtual memory, automatic KV-cache allocation to fit batch under GPU memory budget, continuous batching, prefix caching, chunked prefill, GPU memory fraction config (`--gpu-memory-utilization`), CPU offload, multi-LoRA sharing. Concurrency is the whole point (hundreds of concurrent requests). No automatic idle unload (models stay resident); single authoritative server process per deployment.
+
+ABSTRACTION HINTS
+- Clear internal seams: model registry + `ModelRunner`/executor abstraction over many GPU/hardware platforms; attention backend abstraction (FlashAttention/FlashInfer/TRTLLM/triton); quantization is a pluggable layer; OpenAI/Anthropic/gRPC front-ends are thin adapters over the same engine. The `LLM`/`AsyncLLMEngine` Python API vs the OpenAI-compat server is the canonical "embed vs serve" seam. Strong candidate as a high-throughput backend behind any unified runner abstraction.

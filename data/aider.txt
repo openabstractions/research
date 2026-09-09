@@ -1,0 +1,38 @@
+NAME
+Aider
+
+CATEGORY
+Coding agent (terminal pair-programming)
+
+OFFICIAL SITE
+https://aider.chat
+
+GITHUB REPO
+https://github.com/Aider-AI/aider
+
+LICENSE
+Apache 2.0
+
+WHAT IT DOES
+AI pair-programming in the terminal: builds on an existing repo, edits via "edit formats," auto-commits to git, and runs lint/tests to fix errors.
+
+TECHNICAL ARCHITECTURE
+Python CLI (pip/uv). No autonomous multi-tool loop — a "pair programmer" model: sends repo map + selected files, receives code edits via an "edit format" (whole / diff / unified-diff / udiff), applies them, auto-commits via git, optionally runs linters/tests. Terminal commands run through /commands (shell). See https://aider.chat/docs.
+
+CONTEXT / PROJECT ABSTRACTION
+The repo map is the key abstraction: built with tree-sitter (parses classes/functions/types/signatures), modeled as a graph (files = nodes, edges = dependencies), then ranked (PageRank-style graph ranking) to select the most relevant symbols that fit the token budget (--map-tokens, default 1k). Map is sent with each request; model can ask to add specific files to chat. No LSP/embeddings; tree-sitter AST + dependency-graph ranking. See https://aider.chat/docs/repomap.html.
+
+TOOL CALLING / MCP SUPPORT
+No native MCP client. Tool use is narrow: apply edit-format diffs, run lint/test via configured commands, git. Not an agent-loop/MCP tool-calling architecture.
+
+PROVIDER SUPPORT
+Any LLM: OpenAI, Anthropic, Google Gemini, DeepSeek, xAI, Groq, Cohere, OpenRouter, AWS Bedrock, Azure, Vertex, Ollama/LM Studio (local), GitHub Copilot, any OpenAI-compatible API. Local models fully supported. See https://aider.chat/docs/llms.html.
+
+KEY FEATURES
+Repo map; edit formats; auto git commits with messages; lint/test loop; voice; images/web pages; IDE watch mode; copy/paste to web chat; LLM leaderboards/benchmarks (SWE-bench-centric).
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+Terminal-only (no GUI); requires Python; less "agentic" — no full tool loop, no MCP, limited to edit-format workflow; weaker on non-code/binary/large files; token cost; heavy benchmark/SWE-bench orientation. 1.3k open issues. https://github.com/Aider-AI/aider/issues
+
+ABSTRACTION HINTS
+Two standout reusable seams: (1) repo map — tree-sitter AST -> dependency graph -> graph-ranked selection within a token budget (a clean, portable context abstraction); (2) edit formats — decoupling "model output" from "apply to file" (whole/diff/udiff). Provider layer is well-abstracted via LiteLLM. Git integration is a clean seam. Best to abstract: repo-map context builder + edit-format applicator.

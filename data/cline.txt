@@ -1,0 +1,38 @@
+NAME
+Cline
+
+CATEGORY
+Coding agent (VS Code + JetBrains extension, CLI, and SDK sharing one engine)
+
+OFFICIAL SITE
+https://cline.bot
+
+GITHUB REPO
+https://github.com/cline/cline
+
+LICENSE
+Apache 2.0 (© Cline Bot Inc.)
+
+WHAT IT DOES
+Open-source autonomous coding agent in IDE/terminal; reads project structure, edits files, runs bash commands, with plan/act modes, checkpoints, and human-in-the-loop approval.
+
+TECHNICAL ARCHITECTURE
+TypeScript monorepo sharing a single "agent core": SDK (sdk/), CLI (apps/cli/), VS Code extension (repo root), JetBrains plugin (closed-source, talks to shared core), Kanban (web multi-agent board). Tools: read_file, write_to_file, replace_in_file, execute_command, list_files, browser, MCP tools. Files via VS Code/IDE APIs; terminal via integrated terminal (streams output, handles long-running dev servers). Checkpoints snapshot file state for undo; edits shown as diffs; every action optionally requires approval (or auto-approve). See https://docs.cline.bot.
+
+CONTEXT / PROJECT ABSTRACTION
+No persistent index/LSP/AST. Reads project structure + files via tools; monitors linter/compiler errors while working; .clinerules files carry project conventions (auto-picked by CLI/extension/JetBrains); skills load rules on demand. Context = file contents + terminal/diagnostics output + rules, discovered by the model.
+
+TOOL CALLING / MCP SUPPORT
+Native MCP client (`cline mcp` CLI, MCP servers listed in settings), plus a plugin/SDK system: @cline/sdk exposes Agent + createTool() for custom tools, lifecycle hooks, and connectors. Multi-agent teams, scheduled agents, messaging connectors (Slack/Telegram/Discord/etc). See https://docs.cline.bot/cline-sdk/overview.
+
+PROVIDER SUPPORT
+Any model: Anthropic, OpenAI, Google Gemini, OpenRouter (200+), Vercel AI Gateway, AWS Bedrock, Azure/GCP Vertex, Cerebras/Groq, Ollama/LM Studio (local), any OpenAI-compatible API.
+
+KEY FEATURES
+Plan/Act modes; checkpoints; diff review; multi-agent teams (coordinator + specialists); Kanban (parallel agents, worktrees, dependency chains); SDK; headless CLI for CI/CD (`cline "..."`, --json); scheduled agents (cron); connectors; .clinerules; skills; browser tool.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+High token/API cost (large context per task); context-window pressure on large repos; BYO-API-key only (no free tier); auto-approve security risk if misconfigured; occasional agent loops; VS Code extension still mid-migration into monorepo layout. 636 open issues. https://github.com/cline/cline/issues
+
+ABSTRACTION HINTS
+Strong seams: @cline/sdk (Agent + createTool) is a real programmatic abstraction layer; MCP for tools; .clinerules + skills for context/instructions; checkpoints for state/rollback. The shared "agent core" powering CLI/Kanban/VS Code/JetBrains is the key architecture. Best seams to abstract: tool registration (createTool) and agent orchestration (Agent/multi-agent).

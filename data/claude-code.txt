@@ -1,0 +1,38 @@
+NAME
+Claude Code
+
+CATEGORY
+Coding agent (terminal CLI primary; also IDE extension, desktop, web — all share one engine)
+
+OFFICIAL SITE
+https://claude.com/claude-code (docs: https://code.claude.com/docs)
+
+GITHUB REPO
+https://github.com/anthropics/claude-code
+
+LICENSE
+Proprietary / source-available (NOT OSI open source). LICENSE.md: "© Anthropic PBC. All rights reserved. Use is subject to Anthropic's Commercial Terms of Service." https://raw.githubusercontent.com/anthropics/claude-code/main/LICENSE.md
+
+WHAT IT DOES
+Agentic coding tool that reads a codebase, edits files, runs shell commands, and handles git workflows via natural language; runs in terminal/IDE/desktop/browser.
+
+TECHNICAL ARCHITECTURE
+Node.js (>=18) CLI. Core engine shared across terminal, VS Code/JetBrains extensions, desktop app, and web. Built-in tools: Read, Write, Edit, Bash, Grep, Glob, Task (subagents), TodoWrite, WebFetch, WebSearch, NotebookEdit. Files read via tool calls; terminal via Bash tool (on native Windows requires Git for Windows, else falls back to PowerShell). Sandboxing: permission system (allow/deny lists), per-session approval, optional OS-level sandboxing of Bash (macOS seatbelt); headless `claude -p` mode for CI. See https://code.claude.com/docs/en/overview.
+
+CONTEXT / PROJECT ABSTRACTION
+No prebuilt index/LSP/AST. Agent-driven discovery: grep/glob to find files, Read to pull them into context. CLAUDE.md (project/global memory, read at session start) + "auto memory" persisted across sessions. @-mentions for files. Subagents run in isolated context windows to parallelize exploration and keep main context lean. Context = file contents + tool results, not a dependency graph.
+
+TOOL CALLING / MCP SUPPORT
+Full native MCP client (stdio + HTTP/SSE), plus hooks (shell before/after actions), skills (packaged workflows), subagents, plugins, and an Agent SDK for building custom agents on the same engine. MCP servers configurable via `claude mcp` CLI or .mcp.json. See https://code.claude.com/docs/en/mcp.
+
+PROVIDER SUPPORT
+Anthropic models (Claude Opus/Sonnet/Haiku). Third-party models via LLM gateway env vars (ANTHROPIC_BASE_URL / OpenRouter, Bedrock, Vertex, etc.). No first-class local-model (Ollama) support.
+
+KEY FEATURES
+Subagents (parallel agent teams); Plan mode; checkpoints/rewind (/undo); hooks; skills; CLAUDE.md + auto memory; background agents / agent view; routines + scheduled tasks; headless scripting (`claude -p`), piping (Unix philosophy); git commit/PR automation; GitHub/GitLab CI; Agent SDK; MCP; remote control / web handoff.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+Usage-based cost (expensive on long sessions); API rate limits; closed source (source-available only); no true local models; context bloat/loops on large repos; permission prompt fatigue (mitigated by YOLO/disposable mode but a recurring complaint); Windows support historically weaker (Bash tool needs Git for Windows). Repo shows 5k+ open issues. https://github.com/anthropics/claude-code/issues
+
+ABSTRACTION HINTS
+Clean seams: MCP (tool layer), CLAUDE.md/skills/hooks (context + instruction + lifecycle hooks), permission system (tool-execution gate), subagents + Agent SDK (orchestration). The core agent loop is proprietary, but Agent SDK and MCP are the intended extension points. Best seams to abstract: tool execution (MCP) and instruction/context persistence (CLAUDE.md + memory).

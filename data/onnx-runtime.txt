@@ -1,0 +1,52 @@
+NAME
+ONNX Runtime (ORT)
+
+CATEGORY
+runtime (cross-platform ML inference/training accelerator for the ONNX format)
+
+OFFICIAL SITE
+https://onnxruntime.ai
+Docs: https://onnxruntime.ai/docs/
+
+GITHUB REPO
+https://github.com/microsoft/onnxruntime
+
+LICENSE
+MIT License (ONNX Runtime). (Note: the ONNX format/spec itself is Apache-2.0, governed by Linux Foundation AI & Data; ORT is Microsoft's MIT-licensed implementation.)
+
+WHAT IT DOES
+Runs models serialized in the ONNX format with hardware-specific acceleration; load a model exported from PyTorch/TF/etc. and execute it across CPU/GPU/NPU/mobile/web.
+
+TECHNICAL ARCHITECTURE
+- Core is a C++ inference engine. It parses the ONNX graph, applies graph optimizations (fusion, constant folding), then partitions the graph into subgraphs dispatched to "Execution Providers" (EPs): CUDA, TensorRT, OpenVINO, DirectML, CoreML, QNN, WebGPU, ROCm, XNNPACK, etc.
+- Each EP is a pluggable hardware-specific backend (shared library); a common graph + memory planner coordinates them. A stable C API underlies language bindings: Python (default), C#, C/C++, Java, JavaScript/Web, Objective-C, Rust (community), Ruby/Julia (community).
+- Also ships ORT "Generate API" (GenAI) for LLMs (Phi, Llama, DeepSeek distill etc.) and an ORT model format (flattened, optimized on-disk format for mobile/edge).
+- Language: C++ core; bindings in many languages.
+
+FORMATS / STANDARDS IT DEFINES
+- Consumes/validates the ONNX model format (protobuf-based graph + operator set, defined by the separate ONNX standard at https://onnx.ai).
+- Defines its own ORT format (.ort) for reduced-size optimized models on mobile/edge.
+
+API / PROTOCOLS
+- C API (OrtApi) plus Python/C#/Java/JS/Obj-C bindings; InferenceSession is the core runtime object.
+- Execution Provider registration interface for hardware vendors; plugin EP libraries for out-of-tree EPs.
+
+KEY FEATURES
+- Broad hardware/OS coverage (Windows, Linux, macOS, Android, iOS, Web, edge/IoT).
+- Graph optimization + EP partitioning; quantization (INT8/FP16) tooling; I/O binding; on-device training; distributed training for PyTorch models.
+- Powers Microsoft products (Office, Azure, Bing, Windows ML/WinML).
+
+ADOPTION STATUS
+- The default production deployment path for many enterprises via WinML/Azure/Windows AI; very widely embedded (Edge, Office, cloud). 21k GitHub stars.
+- However, for LLM serving specifically, ORT is a second-tier option vs vLLM/TensorRT-LLM/TGI; ORT is strongest in traditional CV/NLP models and on-device/embedded scenarios.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- ONNX is a lossy, lowest-common-denominator format: exporting exotic ops/models often fails or requires custom ops; dynamic control flow and some ops don't map cleanly.
+- Operator-set versioning and partial op support across EPs cause silent fallback to CPU or errors; each EP supports a different op subset (fragmentation).
+- LLM support historically lagged (GenAI API is newer and less mature than vLLM/TensorRT-LLM); performance tuning requires manual graph/EP fiddling.
+- Telemetry is on by default (opt-out), and the repo is a huge monorepo that is hard to build/customize.
+
+ABSTRACTION HINTS
+- The big lesson: ONNX won as a FORMAT by decoupling model representation (framework-neutral graph) from execution (ORT + EPs). But the split also created its weakness — the format became a moving, under-specified target (many operator-set versions, uneven EP coverage), so "portable model" is only partially true in practice.
+- Execution Providers are a textbook successful plugin abstraction: a single stable graph/memory model with vendor-supplied backends. This is the design pattern to copy: one canonical in-memory representation + a narrow, stable backend interface.
+- The format (ONNX, Apache-2.0, LF-governed) vs runtime (ORT, MIT, Microsoft) split shows a governance pattern: standardize the interchange layer under a foundation, keep the implementation permissively licensed for maximal embedding.

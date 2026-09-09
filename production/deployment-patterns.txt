@@ -1,0 +1,75 @@
+DEPLOYMENT PATTERNS (how the big providers + serverless clouds architect)
+=========================================================================
+
+Frontier providers (OpenAI / Anthropic / Google / Meta) don't publish internals, but
+the consensus architecture inferred from their infra blogs, ex-staff, and the OSS
+ecosystem (Dynamo, KServe, SGLang, vLLM) is:
+
+1) API gateway / control plane
+   - Auth (API keys / OAuth), rate limiting, quota, billing/metering (token counting).
+   - Traffic routing to model backends; OpenAI-compatible request schema is the
+     de-facto lingua franca (even Anthropic/Google expose OpenAI-compatible paths).
+   - Request admission control: when saturated, queue or reject with 429/503 rather
+     than degrade everyone's latency.
+
+2) Model registry + routing layer
+   - A registry maps (model, version/tag) -> set of healthy backend endpoints.
+   - Router picks a backend by: model version, prefix/KV affinity (route same session
+     to same replica to reuse prefix cache), load, capacity, region.
+   - SGLang ships an explicit "sgl-router" / model gateway for this:
+     https://github.com/sgl-project/sglang (experimental/sgl-router)
+
+3) Release / rollout primitives
+   - Canary: ship new model/weights/quant to a small % of traffic, compare quality +
+     cost + latency, then roll out.
+   - Blue/green + shadow traffic (mirror live requests to a candidate, compare
+     outputs offline).
+   - Versioned model endpoints (v1/v2), weights/content-addressed.
+   - KServe exposes canary natively for InferenceService.
+     https://github.com/kserve/kserve
+
+4) Multi-region / multi-zone
+   - Replicate hot deployments across regions for latency + availability; geo-DNS /
+     anycast at the edge; weigh regions by capacity.
+   - GPU availability is non-uniform (a region may not have H100s), so a "global GPU
+     scheduler" picks region+pool; capacity planning is a first-class concern.
+
+5) Compute substrate choices (two models, often mixed):
+   a) Self-managed k8s fleets (NVIDIA GPU Operator + KServe/KubeFlow/Dynamo + Triton)
+      for base load and best $/token at scale.
+   b) Serverless GPU for burst + long tail:
+      - Modal (https://modal.com/docs/guide/gpu): @app.function(gpu="H100:8");
+        container-based, cold starts in seconds, pay-per-second, GPU fallbacks
+        (gpu=["H100","A100:2"]) and auto-upgrades. No always-on infra.
+      - Baseten: model-serving platform (vLLM/TRT-LLM backends), autoscaling,
+        scale-to-zero, per-model metrics; used for open-model APIs.
+      - Replicate: turnkey API for open models, per-prediction pricing, cold-boot
+        caching, model versioning.
+      - RunPod: raw GPU rental + serverless workers + vLLM templates.
+      - Together/Fireworks/Anyscale: managed "serverless" inference built on
+        vLLM/SGLang/TRT-LLM with router + autoscaling.
+   Key serverless-GPU properties worth borrowing: declarative model + hardware
+   spec; cold-start optimization via image/weight caching; per-second billing;
+   autoscale on queue depth; model artifact caching across invocations.
+
+6) Observability (OpenTelemetry + Prometheus)
+   - Distributed tracing: OpenTelemetry spans per request; GenAI semantic conventions
+     define spans for LLM calls (prompt, completion, token counts, model id).
+     https://opentelemetry.io/docs/specs/semconv/gen-ai/
+     (moved to: https://github.com/open-telemetry/semantic-conventions-genai)
+   - Metrics: time-to-first-token (TTFT), inter-token latency (ITL/TPOT), tokens/sec,
+     queue time, KV cache usage, GPU util/memory, per-model error rates.
+   - Engines expose Prometheus metrics + OTel out of the box (vLLM has a dedicated
+     "metrics"/"tracing" module and observability docs; TGI had it first).
+   - Logging: request/response payload capture (with redaction), token-level cost
+     attribution per tenant.
+
+7) Reliability patterns
+   - Circuit breakers, retries with jitter, timeout budgets, backpressure.
+   - "Graceful" model swap: load new weights on a warm standby replica, drain old one.
+   - Fault tolerance: vLLM v1 has fault tolerance / engine restart hooks;
+     TRT-LLM has ADP balance strategy for load rebalancing.
+
+Consensus shape: [Edge LB] -> [API gateway: auth/rate-limit/meter] -> [Router with
+prefix-affinity] -> [pool of engine replicas (vLLM/SGLang/TRT-LLM) on k8s or
+serverless] -> [observability: OTel traces + Prom metrics + token metering].

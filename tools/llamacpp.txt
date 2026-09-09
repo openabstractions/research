@@ -1,0 +1,24 @@
+LLAMA.CPP
+=========
+
+CATEGORY: local inference engine
+LICENSE: MIT
+
+WHAT IT IS
+  Foundational dependency-free C/C++ inference engine for LLM/VLM inference across hardware; the substrate most other local runners (Ollama, LM Studio, GPT4All, Jan, KoboldCpp) are built on.
+
+ARCHITECTURE / SEAMS
+  Clean three-tier layering: ggml (tensor/backend abstraction — one op interface, many GPU backends) below llama (model graph/loader/context/KV-cache) below tools (server/cli). GGUF is the de-facto single-file interchange format. The OpenAI-compat llama-server is a thin adapter over the internal slot/context API.
+
+STINKS
+  - Raw tool: no registry or model manager; manual files/flags.
+  - Rapid API/flag churn between releases breaks wrappers.
+  - No continuous batching; coarse parallel slots; heavy compile matrix.
+
+DONE GREAT
+  - Unmatched hardware/backend matrix and CPU+GPU hybrid inference.
+  - Fine-grained quantization (1.5-8 bit), flash attention, speculative decoding, GBNF structured output.
+  - ggml backend interface is the canonical device-abstraction seam.
+
+ABSTRACTION ANGLE
+  Is the compute backend (and the GGUF interchange layer) in its purest form, with no acquisition/registry or hosting layer of its own. A universal standard would absorb: (a) the ggml-style device/backend interface as the compute-abstraction contract, and (b) GGUF as the model format seam — leaving registry/acquisition and orchestration as layers llama.cpp deliberately does not own.

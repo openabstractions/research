@@ -1,0 +1,725 @@
+SYNOLOGY DOWNLOAD STATION (DSM Web API)
+=======================================
+
+CATEGORY: NAS package with an HTTP/JSON control API. Delegator candidate — the
+transfer runs on another machine entirely, under its own account, and the PC
+reads the result over SMB afterwards.
+LICENSE: Proprietary, bundled free with DSM. Not linked into your binary — you
+speak HTTP to it. No licence contamination. (It bundles GPL components such as
+transmission-daemon, but you never link or ship them.)
+ADDED: 2026-08-21 — transfer-implementation survey, NAS leg.
+DESK RESEARCH ONLY. The NAS was not reachable from this machine. Nothing below
+was measured by us. Everything marked MEASURED elsewhere in this directory was
+measured against BITS, not against this.
+
+KILL CONDITION, STATED BEFORE ANY DATA
+  If Download Station cannot resume a plain HTTPS transfer across a NAS reboot,
+  it is not better than what the PC can already do for itself, and the NAS leg
+  should be a Docker daemon instead.
+  Verdict at the end. Read it there; it is not the only thing that decided it.
+
+WHAT IT IS
+  A DSM package that owns a queue of download TASKS and an HTTP/JSON API over
+  them. It speaks HTTP, HTTPS, FTP, FTPS, BitTorrent, magnet, ED2K and NZB. The
+  DSM UI is itself a client of the same API. The unit of work is a task with an
+  id of the form "dbid_N" — "dbid" being, on its face, a database row id.
+  BitTorrent is not its own code: "DownloadStation does not implement BitTorrent
+  itself. It bundles `transmission-daemon` and drives it over a Unix domain
+  socket at /tmp/synodl_transmission.sock" (github.com/gufranco/synology-
+  downloadstation-bt-fix, COMMUNITY, read 2026-08-21; observed on a DS923+
+  running DSM 7.3.2-86009 Update 4 with DownloadStation 4.1.2-5012). The HTTP/
+  FTP engine is Synology's own and is not documented anywhere we could reach.
+
+SURVIVAL — THE DECISIVE QUESTION
+  Client process exits:  YES, trivially and by construction. The transfer runs
+    on a different computer. This is the strongest form of CapSurvivesProcessExit
+    in the survey: not merely "survives your process" but "survives your whole
+    machine". The PC can be asleep, off, or reinstalled.
+  PC sleeps / hibernates: irrelevant. The NAS does not care. This is the entire
+    reason the owner wants this.
+  Network loss (NAS↔internet): task goes to status "error" with
+    status_extra.error_detail of "timeout" or "broken_link" (Appendix A/B of the
+    official API PDF, revision 2014-03-26, read 2026-08-21). There is NO
+    documented automatic retry for HTTP tasks, and the field remedy is a cron
+    job that calls the CLI's `downloadstation restart all` — a widely circulated
+    community workaround, which exists precisely because auto-retry does not.
+    (forum.synology.com t=78291 and community.synology.com forum/1/post/119917,
+    both COMMUNITY, read 2026-08-21.) This is a material difference from BITS,
+    whose TRANSIENT_ERROR → QUEUED transition is automatic and documented.
+  Session (sid) expires mid-transfer: does not affect the transfer at all. The
+    session authorises the API, not the task. You re-login and carry on polling.
+    This is strictly better than BITS, where the job is tied to a logged-on user.
+  NAS reboot: UNVERIFIED, and Synology documents nothing either way. What is
+    known:
+      - The package auto-starts at boot; tasks persist in Download Station's own
+        on-disk task database (the "dbid_" id shape is the tell).
+      - In-flight data lives in /volume1/@download/<opaque>, holding .part,
+        .filelist, .resume and .torrent files (COMMUNITY: synoforum.com
+        t=3109 and community.synology.com forum/1/post/127180, read 2026-08-21).
+        A ".part" plus a ".resume" is the mechanical prerequisite for resuming.
+      - DownloadStation passes a private task-id argument to transmission and
+        "the daemon must preserve this identifier across restarts or
+        DownloadStation cannot locate torrents after daemon restarts" (gufranco,
+        COMMUNITY) — evidence that task ids are persistent identifiers, not
+        process-scoped handles.
+    That is exactly the shape of evidence we had for BITS reboot survival:
+    circumstantial, mechanical, universally relied on, never stated in one
+    sentence by the vendor. The difference is that for BITS the mechanism is a
+    documented queue database; here the mechanism is an undocumented package
+    directory. TEST THIS BEFORE BUILDING ON IT. Specifically: does an HTTP task
+    at 30% survive `sudo reboot` and continue from 30%, or from 0%?
+  Whether it RESUMES automatically after reboot, as opposed to merely surviving
+    as a queue entry: separately UNVERIFIED and separately decisive. A task that
+    comes back in status "error" and waits for a human is worth very little for
+    a 40 GB overnight download.
+
+THE API SURFACE
+  Two documents, twelve years apart, and you need both.
+
+  Primary A: "Synology Download Station Official API", internal title
+    "Synology_Download Station Official API_20140326". The document's own
+    revision history ends at 2014-03-26. It documents SYNO.DownloadStation.Task
+    VERSION 1 ONLY. Read 2026-08-21.
+  Primary B: "DSM Login Web API Guide", ©2013–2023, indexed as last updated
+    2023-04-19. This is the current authority for SYNO.API.Info and
+    SYNO.API.Auth. Read 2026-08-21.
+  Everything about DSM 7 behaviour, version 3 of the Task API, and all of
+    SYNO.DownloadStation2.* is COMMUNITY or UNVERIFIED. Synology has not
+    refreshed the Download Station API document in over a decade.
+
+  AUTHENTICATION — SYNO.API.Auth
+    Availability: since DSM 6.0. Versions 3–7; "6 (Recommended)". (Login guide.)
+    Login:
+      GET /webapi/entry.cgi?api=SYNO.API.Auth&version=6&method=login
+          &account=<USER>&passwd=<PASS>[&session=DownloadStation]
+          [&format=cookie|sid][&otp_code=][&enable_syno_token=yes]
+          [&enable_device_token=yes&device_name=][&device_id=]
+      The old DS document uses /webapi/auth.cgi with version=2 and requires
+      session=DownloadStation. Both paths are reported working on DSM 7;
+      entry.cgi is the one the current guide uses.
+    Response: {sid, did, is_portal_port, synotoken}.
+      - format=sid returns the sid in JSON and sets no cookie; every subsequent
+        request carries _sid=<sid>. This is the form a daemon wants.
+      - format=cookie (the default) sets the "id" cookie instead.
+      - synotoken appears only if enable_syno_token=yes. If the DSM setting
+        "Improve protection against cross-site request forgery attacks" is on,
+        every subsequent request must also carry SynoToken=<synotoken>.
+      - did is the device token that lets you skip 2FA on later logins. It is
+        the closest thing DSM offers to a durable credential, and it is a 2FA
+        BYPASS, not an access token: you still send account and password.
+    Logout: method=logout (with _sid if not using cookies).
+    LONG-LIVED TOKEN: there is none. DSM 7 has no documented API key, personal
+      access token, or service-account credential for the Web API. The only
+      credential is a DSM account name and password, and the only handle is a
+      sid. A daemon must hold the password and re-login. UNVERIFIED whether
+      DSM 7.3/7.4 added anything; nothing in the 2023 guide.
+    SESSION EXPIRY: error 106 "Session timeout"; error 107 "Session interrupted
+      by duplicated login". A commonly repeated figure is a 7-day default sid
+      lifetime — COMMUNITY, UNVERIFIED, and not in either PDF. Two consequences:
+        1. Poll/Finalize/Abandon must all handle 106 by re-logging-in and
+           retrying once. This is not an error the caller should ever see.
+        2. Error 107 means a second client logging in as the same account with
+           the same session name can invalidate your sid. Give the daemon its
+           OWN DSM account. This is a real operational trap, not a theoretical
+           one.
+      Neither error touches the transfer. The task keeps downloading while your
+      session is dead. That is the whole point of a Delegator.
+    Auth error codes: 400 no such account/wrong password, 401 disabled account,
+      402 denied permission, 403 2FA code required, 404 2FA failed, 406 2FA
+      enforced, 407 blocked IP source, 408/409/410 password expiry.
+
+  DISCOVERY — SYNO.API.Info
+    Version 1, and it is the only API with a fixed location: query.cgi in the
+    old document, entry.cgi in the DSM 7 guide ("The location of SYNO.API.Info
+    is fixed so that you can always request SYNO.API.Info with
+    /webapi/entry.cgi"). Both are reported working.
+      GET /webapi/query.cgi?api=SYNO.API.Info&version=1&method=query&query=ALL
+    Returns {path, minVersion, maxVersion} per API name.
+    YES, USE IT, AND NOT AS A FORMALITY. The Task API's maxVersion is the only
+    honest way to find out what this particular NAS supports, the documentation
+    is a decade stale, and the path is not guaranteed. Hard-coding
+    "DownloadStation/task.cgi?version=1" will work today and is exactly the kind
+    of thing that breaks on a DSM update. Cache the answer; re-query on 102/103/
+    104.
+
+  SYNO.DownloadStation.Task VS SYNO.DownloadStation2.Task
+    SYNO.DownloadStation.Task — CURRENT, DOCUMENTED, USE THIS.
+      path "DownloadStation/task.cgi". Officially documented at version 1 only.
+      On DSM 7.2.1-69057 Update 3 with Download Station 4.0.1-4709, SYNO.API.Info
+      reports minVersion 1, maxVersion 3 (autobrr discussion #1684, 2024-01-19,
+      COMMUNITY). What versions 2 and 3 add beyond the `destination` parameter
+      on create/edit (which the 2014 doc marks "2 and later") is UNDOCUMENTED
+      and UNVERIFIED. Nothing suggests version 1 has been removed or deprecated.
+    SYNO.DownloadStation2.Task — NOT deprecated-and-replaced; INTERNAL.
+      path "DownloadStation/entry.cgi", version 2. It is what the DSM 7 web UI
+      itself calls, and it is undocumented by Synology. The maintained Python
+      client warns: "V2 API is reserved by Synology for internal use and may
+      return `Preserve for other purpose` on most DSM installations"
+      (N4S4/synology-api, read 2026-08-21) — that phrase is DSM common error
+      code 112, verbatim from the login guide's error table.
+      Reverse-engineered create:
+        POST /webapi/DownloadStation/entry.cgi
+             api=SYNO.DownloadStation2.Task&version=2&method=create
+             &type=url&url=<...>&create_list=false&destination=<share/path>&_sid=
+        create_list=false is required and nobody knows why ("not sure of this,
+        but it's a required parameter" — autobrr #1684, 2024-01-19).
+      There is also SYNO.DownloadStation2.Task.Source, .Task.List and
+      .Task.List.Polling, plus *_condition bulk methods (delete_condition,
+      pause_condition, resume_condition). All undocumented.
+      Its one genuine advantage: POST, so magnet links with many trackers do not
+      hit HTTP 414. Irrelevant to us.
+      SO: this is NOT a "v1 is deprecated, migrate to v2" situation. It is
+      "there is a documented public API and an undocumented private one that
+      may refuse you". Wrap v1 (or whatever maxVersion says), discovered
+      through SYNO.API.Info.
+
+  METHODS — SYNO.DownloadStation.Task v1 (all official, 2014-03-26 PDF)
+    list      offset, limit (-1 = all), additional=detail,transfer,file,tracker,
+              peer  →  {total, offset, tasks[]}
+    getinfo   id (comma-separated), additional=...  →  {tasks[]}
+    create    uri (HTTP/FTP/magnet/ED2K, comma-separated), file (multipart
+              upload), username, password, unzip_password, destination
+              →  "No specific response. It returns an empty success response if
+              completed without error."
+    delete    id, force_complete  →  [{id, error}]
+    pause     id  →  [{id, error}]
+    resume    id  →  [{id, error}]
+    edit      id, destination  →  [{id, error}]
+    Per-task error codes: 400 file upload failed, 401 max number of tasks
+    reached, 402 destination denied, 403 destination does not exist, 404 invalid
+    task id, 405 invalid task action, 406 no default destination, 407 set
+    destination failed, 408 file does not exist.
+    Common codes: 100 unknown, 101 bad parameter, 102 no such API, 103 no such
+    method, 104 version unsupported, 105 no permission, 106 session timeout,
+    107 duplicate login, 109/110/111 network unstable or system busy, 112
+    preserve for other purpose.
+
+  DSM 6 → DSM 7: WHAT ACTUALLY CHANGED
+    Less than you would fear, given how much else DSM 7 broke.
+      - Auth is the change that matters. SYNO.API.Auth grew to version 7 and the
+        current guide routes everything through entry.cgi. Clients pinned to
+        auth version 1–2 broke; every third-party integration (Sonarr, autobrr,
+        the PT plugins) has a "fix DownloadStation for DSM 7" issue from 2021.
+      - CSRF SynoToken became a live concern.
+      - Packages run as unprivileged package users in DSM 7. Download Station
+        writes as its own account, so the destination shared folder must grant
+        it write permission. The symptom is error 402 "destination denied" on
+        create, not a permission dialog.
+      - The Task API's paths and method names did NOT change. maxVersion moved
+        from 1 to 3.
+      - The DSM 7 UI moved to SYNO.DownloadStation2.*, which is why so much
+        reverse-engineering chatter is about v2 — that is what a browser
+        devtools capture shows, not what you should call.
+    UNVERIFIED: anything specific to DSM 7.3/7.4 or Download Station 4.1.x.
+
+MAPPING ONTO OUR DELEGATOR — THE IMPORTANT PART
+
+  System() → "synology-downloadstation". Note that the handle is only meaningful
+    together with WHICH NAS. A bare "dbid_17" is not a global identity the way a
+    BITS GUID is. Either the System string carries the host, or the ExternalID
+    does ("nas01:dbid_17"). Get this wrong and a second NAS silently poisons the
+    first one's job records. BITS did not force this question because there was
+    only ever one machine.
+
+  Schemes() → "http", "https", "ftp", "ftps", "magnet", "ed2k". Not "smb": you
+    cannot ask Download Station to fetch from an SMB path. (BITS can. This is a
+    real capability the NAS binding loses.)
+
+  Capabilities() → CapSurvivesProcessExit, CapDelegates, and CapResume only with
+    an asterisk (see RESUME). NOT CapVerifies — see INTEGRITY.
+
+  Start(ctx, spec, from) → create
+    Destination folder: YES. `destination` takes a "Download destination path
+      starting with a shared folder" (e.g. "Download" or "models/gguf"). Added
+      in the 2014-03-26 revision. Note it is a NAS-relative SHARE path, not a
+      filesystem path and emphatically not the Windows UNC path in
+      spec.Sink.Final. The wrapper must carry a configured mapping between
+      \\nas\models\... and models/... . There is no API that reliably tells you
+      the mapping; SYNO.FileStation can list shares, which gets you halfway.
+      This is configuration, not discovery. Say so in the constructor.
+    Filename: NO. There is no parameter for it. The file lands under whatever
+      name the URL or Content-Disposition dictates. spec.Sink.Final's basename
+      cannot be honoured at create time. The wrapper must rename over SMB during
+      Finalize — which is fine, because Finalize has to do a move anyway.
+    `from`: IGNORED, for the same reason and with the same honesty as the BITS
+      binding. There is no offset parameter. Delegating a half-fetched job
+      restarts it from zero. Worse than BITS in one respect: BITS at least does
+      its own byte-range resume from its own state; here you also cannot see
+      whether it did.
+    Auth on the source: `username` and `password` only, and they are HTTP Basic
+      / FTP credentials. Not a header. See THE GAPS.
+    THE TRAP, AND IT IS THE BIG ONE: **create returns no id.** The official
+      response is "No specific success response" — an empty success. You get
+      back nothing you can persist. There is no create-then-get-handle.
+      Consequences, all of them ugly:
+        - The wrapper must call create, then immediately `list` (with
+          additional=detail, so it can see `uri`), and match on uri + create_time
+          + username to work out which task is the one it just made.
+        - That match is racy. Two jobs for the same URL are indistinguishable.
+          Submitting the same model twice — a completely normal thing for a
+          retry to do — produces two tasks the wrapper cannot tell apart.
+        - It is also racy against other clients: the DSM UI, a phone app, or
+          another instance of the daemon can create a task between your create
+          and your list.
+        - Mitigation: serialise Start behind a mutex, snapshot the id set
+          before create, diff after. That works for one wrapper instance and
+          fails the moment two exist. Alternatively use a dedicated DSM account
+          for the daemon so `username` filters out everyone else's tasks; that
+          narrows the race to your own concurrency, which you control.
+        - Runner.Delegate calls d.Abandon(extID) if the handle cannot be
+          recorded. With no id from create, the window between "task exists" and
+          "we know its id" is a window in which a crash leaks a task nobody
+          knows about. BITS closes this by creating the job SUSPENDED and
+          returning the GUID before any byte moves. There is no equivalent here.
+      UNVERIFIED whether SYNO.DownloadStation2.Task's create returns a task id.
+      If it does, that alone might justify preferring the undocumented API — but
+      it may answer 112 and refuse.
+    Id stability across a NAS reboot: probably yes, UNVERIFIED. "dbid_N" is a
+      persistent database row id, and DownloadStation depends on task ids
+      surviving a transmission-daemon restart (gufranco, COMMUNITY). But ids are
+      small sequential integers, so if the task database is ever reset the ids
+      RESTART and get reused. A stale "dbid_17" can therefore resolve to a
+      DIFFERENT task rather than to nothing. BITS GUIDs cannot do this. Guard
+      it: persist create_time and uri alongside the id, and treat a mismatch as
+      DelegateGone. This is a genuine new failure mode the interface does not
+      currently have a word for — Gone is the closest and is the right answer.
+
+  Poll(id) → getinfo
+    GET .../task.cgi?api=SYNO.DownloadStation.Task&version=1&method=getinfo
+        &id=<id>&additional=detail,transfer&_sid=<sid>
+    Status.Done  = additional.transfer.size_downloaded  (STRING of bytes; parse)
+    Status.Total = task.size                            (STRING of bytes; parse)
+      Note both are JSON strings, not numbers — 32-bit-era API design, and the
+      reason a 40 GB size does not overflow anything. Also note task.size may be
+      0 or absent before the server has answered with a Content-Length; treat 0
+      as unknown, exactly as the Runner already does (`if st.Total > 0`).
+      There is no equivalent of BITS's explicit BG_SIZE_UNKNOWN.
+    Also useful: additional.detail.destination and task.title together are what
+      tell Finalize where the file actually landed and what it got called.
+    Status values (Appendix A, official):
+      waiting             → DelegateRunning (queued, not yet started)
+      downloading         → DelegateRunning
+      paused              → DelegateRunning. It is not failed and the bytes are
+                            not lost, but it will never progress on its own. A
+                            wrapper should either report Running and issue a
+                            resume, or expose it — silently reporting Running
+                            forever is how a job hangs for a week.
+      finishing           → DelegateRunning (moving out of @download)
+      finished            → DelegateTransferred
+      hash_checking       → DelegateRunning (BT)
+      seeding             → DelegateTransferred for our purposes. The bytes are
+                            complete; it is uploading. For an HTTP task this
+                            never occurs.
+      filehosting_waiting → DelegateRunning (rate-limited by a file host)
+      extracting          → DelegateRunning (auto-unzip; turn that off)
+      error               → DelegateFailed, with status_extra.error_detail as
+                            Status.Err
+      unknown id          → DelegateGone
+    error_detail values worth mapping specially (Appendix B): broken_link,
+      timeout, disk_full, quota_reached, destination_not_exist,
+      destination_denied, required_premium_account, try_it_later,
+      exceed_max_file_system_size, not_supported_type, unknown.
+    GONE DETECTION: UNVERIFIED. Error code 404 "invalid task id" is documented
+      for the per-task arrays of delete/pause/resume, but the doc does not say
+      what getinfo does with an unknown id. Community clients behave as though
+      the tasks array simply comes back short. Implement it as: getinfo
+      succeeded but no task with our id in the array → Gone. Test it.
+    ONE GENUINE WIN OVER BITS: this is pollable from any machine on the network,
+      not merely from any process on one machine. BITS's GetProgress needs to be
+      on the box. Requirement 5 of SUMMARY.txt — "progress must be pollable from
+      outside" — is satisfied here in its strongest form. Whatever else is wrong
+      with this binding, that part is right.
+
+  Finalize(id) → THERE IS NOTHING TO FINALIZE. Say it plainly.
+    Download Station's two-phase completion is internal and invisible. It writes
+    to /volume1/@download/<opaque>/*.part and, on completion, moves the finished
+    file into the destination shared folder itself. There is no ownership
+    transfer, no acknowledge step, no API call that hands you the bytes, and
+    nothing that reaps unacknowledged tasks after 90 days. When status is
+    "finished", the file is already sitting in the share under whatever name the
+    server gave it. BITS's Complete() has NO counterpart.
+    THE EQUIVALENT, and the wrapper must do all of it:
+      1. getinfo with additional=detail → read `destination` and `title`.
+      2. Translate the NAS share path to the SMB/UNC path the PC can see.
+      3. Verify the file is actually there and the size matches task.size. It is
+         on another machine over a network filesystem; "the API said finished"
+         is not the same statement as "the bytes are readable here".
+      4. Move/rename it to spec.Sink.Final — this is also where the filename we
+         could not specify at create time gets fixed.
+      5. Only then return nil, because Runner.Reconcile hashes spec.Sink.Final
+         the instant Finalize returns.
+    Note this makes Finalize a genuinely expensive, failure-prone, network-
+    dependent operation, which is not what the interface's other implementation
+    implies. It is still the right place for it: the interface says "takes
+    delivery", and taking delivery across SMB is what delivery means here.
+    A cross-volume move is a copy. If @download and the destination share are on
+    the same volume, Download Station's own move is a rename; the wrapper's move
+    to Sink.Final is a rename too, PROVIDED Sink.Final is on the same share. If
+    Sink.Final is a local PC path, Finalize is a 40 GB SMB copy and takes an
+    hour. Configure the mapping so it is not.
+
+  Abandon(id) → delete
+    delete?id=<id>[&force_complete=true]
+    DOES IT DELETE THE FILE? Different from BITS, and in our favour:
+      - Unfinished task, force_complete absent: the task and its partial data in
+        @download go away. Nothing survives. Same as BITS Cancel for a partial.
+      - Unfinished task, force_complete=true: "Delete tasks and force to move
+        uncompleted download files to the destination." The partial is KEPT and
+        moved into the share. BITS has no equivalent — this is a way to salvage
+        what arrived, which the Delegator doc note explicitly says BITS denies
+        you. Whether the truncated file is any use is a separate question; with
+        a digest in the Spec it is not, so default to force_complete absent.
+      - FINISHED task: the file stays. Synology's own help says of the UI
+        action, "Clear completed items — downloaded files will remain in the
+        destination shared folder" (kb.synology.com Download Station "Manage
+        Download Tasks", read 2026-08-21 via search excerpt; the KB page body is
+        JavaScript-rendered and could not be fetched whole, so treat the exact
+        wording as SECONDARY). UNVERIFIED that the API `delete` method takes the
+        same path as the UI's clear/remove, but they are near-certainly the same
+        call.
+      SO: the surprise that bit us with BITS — Cancel destroying a completed
+      file — does NOT happen here. Abandon after Finalize is safe. The opposite
+      hazard appears instead: Abandon can orphan a completed file in the share
+      that no job record points at. If Abandon is called on a finished-but-not-
+      finalised task, the wrapper should delete the file over SMB itself, or
+      accept that it accumulates garbage. Neither is free.
+
+RESUME
+  For HTTP/HTTPS: pause and resume are first-class and apply to HTTP tasks, not
+  only BT — the API's pause/resume take any task id, and Synology's help
+  describes pausing and resuming "BT/HTTP/FTP/NZB tasks". That is only
+  meaningful if the HTTP engine issues a Range request against a cooperating
+  server, so byte-range resume must exist. But NO SYNOLOGY DOCUMENT STATES THE
+  MECHANISM, there is no equivalent of BITS's explicit http-requirements page,
+  and there is no way to ask a task what it will do. UNVERIFIED, and it is the
+  central unverified fact in this profile.
+  What the wrapper can never do: resume from a byte offset it chose. There is no
+  `from`.
+  What it verifies about what it resumed: nothing that we could find. BITS at
+  least documents size + timestamp. Assume less than that.
+  For BT: piece-hashed by transmission, verified by construction, and
+  hash_checking is a visible status. Irrelevant to GGUF-over-HTTPS.
+
+INTEGRITY
+  NONE, and unlike BITS there is not even a hook. BITS gives you
+  IBackgroundCopyFile3::GetTemporaryName and SetValidationState so you can hash
+  the in-flight file and tell BITS the verdict. Download Station offers no
+  checksum parameter on create, no digest field on a task, and no callback.
+  The @download temp directory is not an API surface.
+  IMPLICATION: exactly the same as for BITS, so the facade already handles it.
+  Runner.Reconcile hashes spec.Sink.Final after Finalize and, on mismatch,
+  clears Delegation, resets VerifiedPrefix to 0 and sends the job back to
+  StatePending. Do not claim CapVerifies. The one aggravating factor: here the
+  hash is computed over SMB across a network, so a mismatch costs a full re-read
+  of 40 GB before you even learn about it, and a re-download after. Budget for
+  it, and consider hashing on the NAS instead (see DOCKER ALTERNATIVE — a daemon
+  that hashes as it writes makes this cost vanish entirely).
+
+THE GAPS THAT MATTER FOR OUR USE
+
+  HTTP RANGE RESUME FOR A PLAIN HTTPS URL, OR ONLY BT?
+    Almost certainly both, since pause/resume are offered for HTTP tasks and a
+    .part/.resume pair sits in @download. UNVERIFIED and undocumented. The
+    honest position: this is the single fact that decides whether the binding is
+    worth writing, and Synology will not tell you. Measure it: start a large
+    HTTP task, pause at 20%, resume, and watch whether the server logs a Range
+    request or a second full GET.
+
+  HUGGINGFACE SIGNED, REDIRECTING, EXPIRING CDN URLS
+    Will it follow the redirect? Almost certainly — Download Station's entire
+      file-hosting feature set is built on following redirects, and it has a
+      "required_premium_account" error detail, which only makes sense for a
+      client that is chasing hosts around. UNVERIFIED for huggingface.co
+      specifically.
+    Will it survive the signature expiring? SAME OPEN RISK AS BITS, AND WORSE.
+      Our own BITS work measured the HuggingFace CDN signature at roughly ONE
+      HOUR of validity (download/go/bits/bits.go, TestSignedRedirectingCDN,
+      2026-08-18). A 40 GB model on a domestic link does not finish in an hour.
+      The unanswered question is identical: on retry, does it re-request the
+      original huggingface.co/.../resolve/main/... URL — picking up a fresh
+      signature — or does it retry the resolved cdn-lfs URL it was handed, and
+      get a 403?
+      Why it is WORSE here than with BITS:
+        1. BITS retries automatically. Download Station has no documented HTTP
+           auto-retry; the task goes to status "error" with error_detail
+           "broken_link" and sits there. The community's answer is a cron job.
+        2. There is no way to give an existing task a new URL. `edit` changes
+           the destination and nothing else. So even a wrapper that is willing
+           to re-resolve the redirect chain hourly has nowhere to put the
+           result. Your only move is delete + create, which restarts from zero.
+        3. Combined with `from` being unhonourable, a 40 GB download that trips
+           the signature at 35 GB has to start again at 0.
+      This is not a small caveat. It is a plausible mechanism by which the
+      intended use case — 40 GB GGUF from HuggingFace, overnight, unattended —
+      never completes at all, no matter how good the reboot story is.
+      MITIGATION IF YOU BUILD IT ANYWAY: prefer sources that are not signed and
+      expiring (a mirror, an internal store, a plain static host), and refuse to
+      delegate a transfer whose estimated duration exceeds the signature life.
+      The facade is the right place for that refusal, and it is the same rule
+      the BITS binding needs.
+
+  CUSTOM HTTP HEADERS (Authorization: Bearer, for gated repos)
+    NO. The create method's only credential parameters are `username` and
+    `password`, which are HTTP Basic / FTP credentials, not headers. There is no
+    header parameter in v1, and none is reported for v2.
+    Whether HuggingFace accepts Basic auth with the token as the password is
+    UNVERIFIED here and would be a workaround, not a feature. Embedding
+    credentials in the URL is the other workaround, and it puts a token into the
+    task's `uri` field, which every DSM user with Download Station access can
+    read via `list`. Do not do that.
+    VERDICT: gated repos are effectively out of reach through this binding.
+
+  RATE LIMITS, TASK COUNT LIMITS, THROTTLING
+    Task count: MODEL-DEPENDENT AND PUBLISHED. Synology's per-model product
+      specification has a "Download Station / Maximum Concurrent Download Tasks"
+      line. DS923+: 80 (Product_Spec_DS923+_enu.pdf, "Last updated: Jul 7,
+      2025", read 2026-08-21). Entry-level and J-series models are lower. Check
+      the owner's actual model. Exceeding it returns Task API error 401, "Max
+      number of tasks reached". Compare BITS: MaxJobsPerUser 60,
+      MaxJobsPerMachine 300 — same order of magnitude, and neither is a
+      constraint for a handful of model downloads.
+    API request rate: no documented limit and no documented throttle. What does
+      exist is DSM Auto Block (Control Panel → Security → Protection), which
+      blocks a source IP after N FAILED LOGINS within M minutes, and Download
+      Station is explicitly one of the services it covers. That is a login-
+      attempt limiter, not a request limiter. The practical hazard is a daemon
+      that retries a bad password in a tight loop and locks itself out of the
+      NAS. Back off on 400, and put the daemon's IP on the allow list.
+    Bandwidth: Download Station has http_max_download (KB/s, "0" means
+      unlimited) in SYNO.DownloadStation.Info getconfig, plus
+      SYNO.DownloadStation.Schedule for time-of-day throttling. This is the
+      analogue of BITS's deliberate slowness, except it is off by default and
+      you can read it. Read it at startup and log it — a mysteriously slow
+      40 GB download that turns out to be a 500 KB/s schedule is a bad evening.
+
+DOCKER ALTERNATIVE
+  The NAS runs Container Manager (DSM 7.2's rename of the Docker package;
+  x86_64 on + and xs models, ARM64 on some recent value/J models, 64-bit CPU
+  required — check the specific model before promising anything). We already
+  have vault/cmd/vaultd: a Go daemon with a FileStore job queue, a worker, a
+  bearer-token-protected /v1/jobs HTTP API, and vault/internal/transfer/http.go
+  which already issues `Range: bytes=N-` and already hashes what it fetches.
+  Putting that on the NAS costs a Dockerfile (FROM scratch over a
+  CGO_ENABLED=0 GOOS=linux cross-build — no toolchain on the NAS, no dependency
+  to install), a compose file with restart: unless-stopped, one bind mount onto
+  the models share, and a shared token. That is an afternoon, and it is an
+  afternoon we would otherwise spend writing the Download Station binding's
+  create-then-guess-the-id reconciliation and its SMB Finalize. In exchange the
+  daemon gets every single thing Download Station cannot do: a real job id
+  returned from submit, resume from an offset WE choose, arbitrary request
+  headers so gated repos work, re-resolution of an expiring HuggingFace redirect
+  without losing the bytes already on disk, digest verification computed on the
+  NAS as the bytes land rather than re-read over SMB afterwards, and — the part
+  that actually matters for the abstraction — the same Go code the PC runs, so
+  the NAS leg is not a second implementation to keep honest. RECOMMENDATION:
+  build the container. Download Station's only real advantage is that it already
+  exists, and the id problem, the header problem and the URL-refresh problem
+  each independently cost more to work around than the container costs to write.
+
+STINKS
+  - create returns no id. Everything downstream of that is a workaround.
+  - No content integrity, no validation hook, no digest parameter.
+  - No custom headers, so gated HuggingFace repos are out.
+  - No way to update a task's URL, so an expired signed URL means start over.
+  - No documented HTTP auto-retry; "error" is a terminal state that waits for a
+    human, and the community's fix is a cron job calling a CLI.
+  - The official API document was last revised 2014-03-26. Everything about
+    DSM 7 is community knowledge.
+  - The version the DSM UI actually uses (DownloadStation2) is undocumented and
+    may answer 112 "Preserve for other purpose".
+  - No long-lived token. The daemon holds a DSM password.
+  - Error 107: someone else logging in as the same account kills your session.
+  - Task ids are small sequential integers and can be reused after a database
+    reset, so a stale handle can resolve to the WRONG task rather than to none.
+  - Reboot resume — the thing the whole idea rests on — is undocumented.
+  - Auto-unzip is on by default for some configurations and will happily try to
+    extract things. Turn it off (unzip_service_enabled).
+
+DONE GREAT
+  - Survives the client machine being ASLEEP, OFF, or REBUILT. No other binding
+    in this survey does that. This is the whole reason to consider it.
+  - Progress is pollable over the network by any process on any machine — the
+    strongest possible reading of requirement 5, stronger than BITS.
+  - Session lifetime is decoupled from transfer lifetime. Your session can die
+    a hundred times and the download does not notice.
+  - Deleting a task does NOT delete a completed file, so Abandon is not the trap
+    Cancel was.
+  - force_complete=true salvages a partial into the share, which BITS refuses.
+  - Free, installed, no licence exposure, and it is plain JSON over HTTP — no
+    COM, no vtables, no cgo, net/http and encoding/json and nothing else.
+  - Task count limits are published per model instead of being folklore.
+
+ABSTRACTION ANGLE
+  This binding is the useful stress test of the Delegator interface, and it
+  passes it in an instructive way. Four of the five things a naive download(url)
+  gets wrong are confirmed again from a completely different direction:
+  identity must be external (#1) — and Download Station proves the stronger
+  version, that identity must be external to the MACHINE, not merely to the
+  process; the sink is a path declared up front (#3) — and here it is a path in
+  another computer's namespace, which is why Sink is a struct and not a string;
+  integrity is an input (#4) — Download Station verifies nothing, exactly like
+  BITS, from an unrelated codebase; and capabilities differ and progress must be
+  pollable from outside (#5) — satisfied here better than anywhere else.
+  Number 2 is the interesting one. Two-phase completion (#2) DOES NOT APPLY.
+  There is no Complete(), no ownership transfer, no unacknowledged-job reaper.
+  That is not a hole in the interface — Finalize is still exactly the right
+  hook, it just does a different job here (locate, verify presence, move to
+  Sink.Final) than it does for BITS (acknowledge). The lesson is that Finalize
+  should be documented as "take delivery", not as "acknowledge", because one
+  implementation's mandatory handshake is another's cross-machine move. The
+  interface as frozen accommodates both. Good.
+  The one place the interface is genuinely strained is Start's contract to
+  return an externalID. Download Station cannot honour it atomically, and no
+  amount of wrapper cleverness makes create-then-list race-free against other
+  clients. That is a fact about Download Station, not a defect in the interface
+  — but it is worth recording that "the delegate returns a handle from the
+  submit call" is an assumption, and one real system violates it.
+
+SOURCE PROVENANCE
+  PRIMARY (Synology official), all read 2026-08-21:
+  https://global.download.synology.com/download/Document/Software/DeveloperGuide/
+    Package/DownloadStation/All/enu/Synology_Download_Station_Web_API.pdf
+    — internal title "Synology_Download Station Official API_20140326"; its own
+      revision history ends 2014-03-26. Covers SYNO.DownloadStation.Task v1 only.
+  https://global.download.synology.com/download/Document/Software/DeveloperGuide/
+    Os/DSM/All/enu/DSM_Login_Web_API_Guide_enu.pdf
+    — ©2013–2023, indexed as last updated 2023-04-19. SYNO.API.Info and
+      SYNO.API.Auth v3–7, common error codes 100–112.
+  https://global.synologydownload.com/download/Document/Hardware/ProductSpec/
+    DiskStation/23-year/DS923+/enu/Product_Spec_DS923+_enu.pdf
+    — "Last updated: Jul 7, 2025". "Download Station / Maximum Concurrent
+      Download Tasks: 80".
+  https://kb.synology.com/en-us/DSM/help/DownloadStation/ (task creation and
+    management help) and .../AdminCenter/connection_security_protection
+    (Auto Block). NOTE: these KB pages are JavaScript-rendered and could not be
+    fetched in full; quotations from them are via search excerpts and should be
+    treated as SECONDARY until read in a browser.
+
+  COMMUNITY / REVERSE-ENGINEERED (marked as such throughout), read 2026-08-21:
+  https://github.com/autobrr/autobrr/discussions/1684 — 2024-01-19, tested on
+    DSM 7.2.1-69057 Update 3 / Download Station 4.0.1-4709. Source of: Task API
+    minVersion 1 maxVersion 3; the DownloadStation2 create parameters;
+    create_list=false being required and unexplained.
+  https://n4s4.github.io/synology-api/docs/apis/classes/downloadstation and the
+    N4S4/synology-api source — the "V2 API is reserved by Synology for internal
+    use" warning, and the full v1/v2 method and parameter inventory.
+  https://github.com/gufranco/synology-downloadstation-bt-fix — Download Station
+    bundling transmission-daemon over /tmp/synodl_transmission.sock, the private
+    task-id argument, and the requirement that it survive daemon restarts.
+    Observed on DS923+ / DSM 7.3.2-86009 Update 4 / DownloadStation 4.1.2-5012.
+  https://github.com/kwent/syno — DSM 5.x/6.x API definition files including
+    SYNO.DownloadStation2.Task.
+  forum.synology.com t=78291, community.synology.com forum/1/post/119917,
+    forum/17/post/46119, forum/1/post/127180, synoforum.com t=3109 — no HTTP
+    auto-retry, the `downloadstation restart all` cron workaround, and the
+    /volume1/@download layout with .part / .resume / .filelist.
+
+  OUR OWN, for the comparison: download/go/delegator.go, download/go/bits/bits.go
+  (including the measured ~1 hour HuggingFace CDN signature lifetime,
+  2026-08-18), research/transfer/bits.txt, research/transfer/SUMMARY.txt.
+
+  NOT VERIFIED BY US — the list is long and honest:
+  reboot survival; reboot auto-resume; HTTP byte-range resume at all; behaviour
+  against a HuggingFace signed redirect; whether getinfo on an unknown id errors
+  or silently omits; whether DownloadStation2.Task's create returns a task id;
+  whether DownloadStation2 answers 112 on this NAS; what Task API versions 2 and
+  3 add; the 7-day sid lifetime; whether the API `delete` on a finished task
+  leaves the file; DSM 7.3/7.4 specifics; whether HuggingFace accepts the token
+  as an HTTP Basic password. The NAS was not reachable from this machine.
+
+
+================================================================================
+SUMMARY
+================================================================================
+
+KILL CONDITION, STATED BEFORE ANY DATA (repeated from the top of this file)
+  If Download Station cannot resume a plain HTTPS transfer across a NAS reboot,
+  it is not better than what the PC can already do for itself, and the NAS leg
+  should be a Docker daemon instead.
+
+TABLE — DOWNLOAD STATION vs BITS
+
+                          DOWNLOAD STATION            BITS
+  survives process exit   YES — survives the whole    YES, while the owning
+                          client MACHINE being off    user stays logged on
+  survives reboot         UNVERIFIED. Undocumented    yes (universally relied
+                          by Synology. Mechanism      on; qmgr.db + 90-day
+                          (.part/.resume in           timeout; never stated in
+                          @download, "dbid_" row      one sentence by MS).
+                          ids) is circumstantial.     UNVERIFIED by us too.
+  resumes automatically   PARTLY. Auto-resumes on     YES, documented.
+                          package start (implied,     TRANSIENT_ERROR → QUEUED
+                          UNVERIFIED). Does NOT       on network recovery;
+                          auto-retry HTTP errors —    suspend/resume on logoff/
+                          "error" waits for a human;  logon.
+                          field fix is a cron job.
+  persistent id a third   PARTIAL. "dbid_N" is        YES. Job GUID, opaque,
+  party can query         queryable over the network  globally unique, openable
+                          by ANY machine — better     by any process on the box,
+                          than BITS in reach. But     adoptable by an admin via
+                          CREATE RETURNS NO ID, and   TakeOwnership.
+                          ids are small sequential
+                          integers that can be
+                          REUSED after a DB reset.
+  verifies content        NO. No digest parameter,    NO. Size + timestamp only
+                          no validation hook, no      — but there IS a hook
+                          checksum field. Nothing     (GetTemporaryName +
+                          at all.                     SetValidationState).
+  licence / cost          Free with DSM. Proprietary. Free with Windows.
+                          HTTP/JSON, not linked.      Proprietary, not linked.
+                          No exposure.                No exposure.
+
+  Extra rows worth having, since they decided it:
+  handle returned by      NO — empty success. Must    YES — GUID, before any
+  the submit call         create then list and guess. byte moves.
+  custom request headers  NO. username/password only. NO, but not needed for
+                          Gated HF repos unreachable. our sources today.
+  can be handed a         NO. `edit` changes the      N/A — BITS re-requests on
+  refreshed URL           destination and nothing     its own; whether it
+                          else. Expired signature =   re-resolves the redirect
+                          delete + start from zero.   is UNVERIFIED.
+  start at a byte offset  NO.                         NO.
+  two-phase completion    NOT APPLICABLE. Writes      MANDATORY. Complete() or
+                          straight into the share.    the file is not yours.
+  Abandon destroys a      NO — completed files stay   YES — Cancel() deletes
+  completed file          in the share.               completed files too.
+
+RECOMMENDATION: BUILD (our own container). Do not wrap Download Station.
+
+  Three reasons, in order, and any one of them would be enough:
+  1. The HuggingFace case does not work. The CDN signature lives about an hour
+     (measured, 2026-08-18); a 40 GB model does not. Download Station has no
+     documented HTTP auto-retry, no way to give an existing task a fresh URL,
+     and no way to start from an offset. So the failure mode is not "slow and
+     wasteful" as it is with BITS — it is "delete and start again from zero,
+     forever". And gated repos are simply unreachable, because there is no way
+     to send an Authorization header. The intended use is HuggingFace GGUFs.
+     This is the use case failing, not an edge.
+  2. create returns no id. Every workaround for that is racy against the DSM UI,
+     a phone app, and a second copy of our own daemon. Runner.Delegate's
+     "record the handle or Abandon it" safety net has nothing to hold on to in
+     the window between create and list. That is the interface's core assumption
+     — a handle from the submit call — and this system cannot honour it.
+  3. The container is cheaper than the wrapper. vault/cmd/vaultd already exists,
+     already does Range resume, already hashes, already has a job queue and a
+     token-protected HTTP API. Cross-compiling it into a scratch image and
+     bind-mounting the share is less work than writing the create-then-guess
+     reconciler and the SMB Finalize, and it produces something strictly better:
+     one implementation shared between the PC and the NAS, verification done on
+     the NAS as the bytes land instead of re-read over SMB, and a real job id.
+
+  The kill condition was aimed at reboot resume, and reboot resume is genuinely
+  UNVERIFIED — Synology documents nothing, and the evidence (a .part beside a
+  .resume, a "dbid_" row id, a package that auto-starts) is the same shape of
+  circumstantial mechanical evidence we accepted for BITS. It might well pass.
+  IT DOES NOT MATTER. The binding fails for reasons that a reboot test cannot
+  rescue: no returned handle, no header control, no URL refresh. Test the reboot
+  question anyway if the NAS is in front of you — the answer is worth knowing,
+  and if a Docker daemon ever needs a fallback it is nice to know whether this
+  one exists. But do not gate the decision on it.
+
+  ONE THING WORTH TAKING ANYWAY: Download Station is the proof that progress
+  polling has to work from a machine that did not start the transfer, not merely
+  from a process that did not start it. BITS made the weaker version of that
+  argument. Keep Poll's contract as it is; it was right, and now two unrelated
+  systems say so.

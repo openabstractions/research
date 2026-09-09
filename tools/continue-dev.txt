@@ -1,0 +1,26 @@
+CONTINUE.DEV (CONTINUE)
+=========
+
+CATEGORY: coding agent
+LICENSE: Apache 2.0
+
+WHAT IT IS
+  Open-source coding agent as a VS Code/JetBrains extension and CLI; define custom assistants with models, rules, and context providers.
+
+ARCHITECTURE / SEAMS
+  TypeScript monorepo (VS Code ext, JetBrains plugin, CLI, shared core, webview GUI, Rust sidecar for indexing). Context via an explicit "context provider" abstraction: @-mentions pull files/code/docs/URLs/diff/terminal; "@codebase" uses local embeddings + retrieval (Rust sidecar index) for RAG-style semantic retrieval. Rules via .continuerules. Tool execution via file edit, terminal, MCP tools. Clean seam: context providers (the most explicit context abstraction among the open tools), assistants config, models. Historically more context/chat-oriented than a full autonomous tool loop.
+
+STINKS
+  - Repo now read-only / "no longer actively maintained" — effectively archived (2.0.0 final)
+  - JetBrains plugin deprecated in favor of CLI
+  - Config (JSON/YAML) complexity; indexing/performance on large repos
+  - Acquired by Google (2025) — long-term direction uncertain
+
+DONE GREAT
+  - Explicit "context provider" plugin seam — files/diff/docs/embeddings as first-class providers
+  - @codebase RAG retrieval via a dedicated Rust sidecar index
+  - Custom assistants = prompt + model + context + rules in config
+  - Model-agnostic providers config
+
+ABSTRACTION ANGLE
+  Occupies the context + assistant-config layer. Its "context providers" abstraction is the single cleanest reference for a universal context standard — a formal provider interface for files/diff/docs/embeddings. The @codebase embedding-index (Rust sidecar) is a reusable RAG seam. Because the repo is archived, its value is reference-only: the context-provider contract is what a minimal standard should absorb.

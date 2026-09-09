@@ -1,0 +1,23 @@
+CrewAI
+=========
+
+CATEGORY: workflow/orchestration
+LICENSE: MIT
+
+WHAT IT IS
+  Python framework for role-based multi-agent orchestration: autonomous agent teams ("Crews") plus deterministic event-driven workflows ("Flows").
+
+ARCHITECTURE / SEAMS
+  Two abstractions: Crews (high-level role/goal/backstory agents with sequential or hierarchical process) and Flows (event-driven graph with decorators @start/@listen/@router, Pydantic-typed state, logical combinators). LLM access via LiteLLM; telemetry via OpenTelemetry. Crews are elegant but "leaky" (delegation/manager behavior emergent); Flows provide the deterministic complement.
+
+STINKS
+  - Telemetry ON by default (anonymous data; opt-out via env var) — privacy concern.
+  - Multi-agent nondeterminism: autonomy hard to debug, unpredictable cost/loops.
+  - High-level abstractions hide internals ("magic"); advanced observability/deploy gated behind paid AMP.
+
+DONE GREAT
+  - Intuitive role/task/crew metaphor makes quick multi-agent setups fast.
+  - Clean autonomy-vs-control split: Crews for emergent collaboration, Flows for deterministic event-driven control with typed state.
+
+ABSTRACTION ANGLE
+  Two clean, opinionated abstractions with an explicit autonomy-vs-control split. For a universal standard, Flows (event-driven graph + typed state) is the absorbable deterministic seam — roughly the same state-machine idea as LangGraph but higher-level; Crews is more ergonomic but less principled, so less useful as a standard. Shows the ergonomics/principles tradeoff a minimal standard must navigate.

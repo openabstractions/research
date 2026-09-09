@@ -1,0 +1,362 @@
+IN-PROCESS LANGUAGE PRIMITIVES — the eight designs, compared
+=============================================================
+
+CATEGORY: prior art for the Task/Job/Future abstraction (in-process group)
+ADDED: 2026-08-19
+STATUS: the least important group for this project, and the best documented.
+  Read the table, read section 3 (progress) and section 5 (the verdict), skip
+  the rest unless designing the per-language binding.
+WHY IT IS THE LEAST IMPORTANT: not one of these survives process exit. Not one
+  can be observed by another process. Six of the eight have no progress concept
+  at all. They are the BINDING layer, not the abstraction. Their value here is
+  (a) they tell us which idioms each language's users expect a job handle to be
+  projected into, and (b) two of them — C#'s CancellationToken and Kotlin's
+  structured Job tree — contain ideas worth stealing outright.
+
+---------------------------------------------------------------------------
+1. THE TABLE
+---------------------------------------------------------------------------
+                    SURVIVES  3rd-PARTY  PROGRESS   CANCELLATION   ERROR MODEL
+                    PROC EXIT  OBSERVE?
+  C# Task            NO        NO        NO*        cooperative,   AggregateEx /
+                                                    CancellationTok  awaited throw
+  Kotlin Job/        NO        NO        NO         cooperative,   exception up
+    Deferred                                        parent-scoped    the scope tree
+  Java Completable-  NO        NO        NO         "cancel" that  Completion-
+    Future                                          does NOT stop    Exception
+                                                    the work
+  Java Structured-   NO        NO        NO         cooperative,   FailedException /
+    TaskScope                                       thread interrupt  joiner-defined
+  Rust Future /      NO        NO        NO         BY DROP, or    Result<T,E>;
+    tokio::JoinHandle                               abort() at an    JoinError
+                                                    await point      (cancelled/panic)
+  Go (no future      NO        NO        NO         context.Context Go errors;
+    type at all)                                    signal only       errgroup first-err
+  JS Promise         NO        NO        NO         NONE in Promise;  reject(reason)
+                                                    AbortController
+                                                    bolted alongside
+  Python asyncio     NO        NO        NO         cooperative,   exception /
+    .Task                                           CancelledError   CancelledError
+  Python concurrent  NO        NO (same  NO         CANNOT cancel  exception re-
+    .futures.Future  (proc     process               a running task   raised on
+                     pool: no) only)                                  result()
+  Swift Task         NO        NO        NO*        cooperative,   throws / Result
+                                                    Task.isCancelled
+
+  * C#: IProgress<T>/Progress<T> exists but is a SEPARATE, out-of-band callback
+    channel that the caller passes in; it is not part of Task and does not
+    survive anything. Swift: Foundation's Progress (NSProgress) is likewise
+    separate from Swift Concurrency. See section 3 — and see the WinRT note,
+    which is the one real counterexample.
+
+  Every cell in the first two columns is NO. That is the finding. There is no
+  in-process language primitive anywhere in mainstream use that satisfies this
+  project's decisive requirement, and there is no near miss.
+
+---------------------------------------------------------------------------
+2. PER-LANGUAGE NOTES — only what is load-bearing
+---------------------------------------------------------------------------
+
+C# — Task + CancellationToken. Does "most complete design" hold up?
+  Partly, and the part that holds up is not Task.
+  - Lifecycle: TaskStatus has eight values (Created, WaitingForActivation,
+    WaitingToRun, Running, WaitingForChildrenToComplete, RanToCompletion,
+    Canceled, Faulted). Richer than anyone else's. Terminal states distinguish
+    cancelled from faulted, which most designs conflate.
+  - The genuinely great idea is CANCELLATION AS A SEPARATE, PASSABLE,
+    COMPOSABLE VALUE: CancellationTokenSource owns the trigger, CancellationToken
+    is a read-only capability you hand down, CreateLinkedTokenSource composes,
+    Register attaches cleanup, and cancellation is a first-class *argument* to
+    every async API rather than a method on the handle. Splitting "who may
+    cancel" from "who observes cancellation" is a capability-security decision
+    and it is the single best idea in Group A. Go copied it (context), Rust
+    copied it (tokio_util CancellationToken), Java did not, JS eventually did
+    (AbortController/AbortSignal is the same split under different names).
+  - What does NOT hold up:
+      * Cancellation is cooperative only. .NET Core removed Thread.Abort; there
+        is no forced kill. Correct choice, but it means "cancelled" is a request.
+      * A CancellationToken is a pointer into this process's heap. It cannot be
+        serialised, transferred, or observed from outside. The best-designed
+        cancellation primitive in Group A is exactly as useless across a process
+        boundary as the worst.
+      * Progress is out-of-band (IProgress<T>), the caller supplies the sink,
+        and a caller who is not there (crashed, or never was the submitter) gets
+        nothing.
+      * Task conflates "the operation" with "the future value", and is eager,
+        hot, and already running when you receive it. There is no "submitted but
+        not started" that you can inspect.
+  - THE COUNTEREXAMPLE WORTH MORE THAN Task ITSELF: WinRT's async model.
+    Four ABI interfaces — IAsyncAction, IAsyncActionWithProgress<TProgress>,
+    IAsyncOperation<TResult>, IAsyncOperationWithProgress<TResult,TProgress> —
+    all deriving from IAsyncInfo, whose members are Id(), Status(), ErrorCode(),
+    Cancel(), Close(). (Source: learn.microsoft.com IAsyncOperationWithProgress
+    and C++/WinRT concurrency docs, fetched 2026-08-19.)
+    This matters for three reasons: it is an ABI, not a language feature, so it
+    is genuinely cross-language (C++, C#, JS, Rust via windows-rs bind the same
+    interfaces); PROGRESS IS IN THE TYPE, not bolted on; and there is an `Id`
+    on the handle. It is the closest thing to a cross-language async ABI anyone
+    has shipped. Its limits are equally instructive: Id is process-local, the
+    handle is a COM pointer, and Close() is a lifetime verb, not a job verb.
+    So even the one cross-language async ABI in existence did not cross a
+    process boundary. Worth studying before claiming the design space is empty.
+
+Kotlin — Job, Deferred, structured concurrency
+  - Job has an explicit, documented state machine: New -> Active -> Completing ->
+    Completed, with Cancelling -> Cancelled as the failure path, exposed as three
+    booleans (isActive, isCompleted, isCancelled) rather than an enum.
+  - THE IDEA TO STEAL IS THE TREE. Every coroutine has a parent Job; a scope does
+    not complete until its children do; cancelling a parent cancels all children;
+    an uncaught failure in a child cancels the parent (unless a SupervisorJob
+    breaks that edge). Cancellation propagates DOWN, failure propagates UP.
+    Nobody else in Group A makes the parent/child edge a first-class,
+    inspectable, overridable thing (Job.children is enumerable).
+    Direct relevance: our chain is app -> system service -> NAS. That IS a job
+    tree spanning three processes, and Kotlin is the design that treats the tree
+    as the object rather than each node in isolation. What a durable version
+    needs that Kotlin cannot give is a parent id that is meaningful in another
+    process — which is just to say: put a `parent` field in the record.
+  - Cancellation is cooperative and checked at suspension points; a tight
+    non-suspending loop is uncancellable unless it calls ensureActive()/yield().
+    CancellationException is special-cased so it does not look like a failure.
+  - Composition: awaitAll, select. No progress concept; the idiomatic answer is
+    to emit a Flow alongside, i.e. a second channel, i.e. the same out-of-band
+    answer as C#.
+
+Java — CompletableFuture, and Loom / StructuredTaskScope
+  - CompletableFuture is the cautionary tale. Its javadoc states that
+    mayInterruptIfRunning "has no effect in this implementation because
+    interrupts are not used to control processing" (verified against Oracle's
+    Java SE javadoc, 2026-08-19). So cancel() marks the future cancelled and
+    LEAVES THE WORK RUNNING. Every downstream stage sees CancellationException
+    while the thread keeps burning CPU and network.
+    The reason is structural and it is the most useful lesson in Group A: a
+    CompletableFuture is not bound to any executing thread — `new
+    CompletableFuture<>()` is legal and has no work behind it — so the handle
+    genuinely does not know what to cancel. THE HANDLE WAS SEPARATED FROM THE
+    WORK AND CANCELLATION FELL THROUGH THE GAP. That is precisely the topology of
+    our problem (the handle is here, the work is in another process), so this is
+    the failure mode we must design against, not an aside. The fix is that a
+    cancel request must be ROUTED TO THE EXECUTOR by identity, not invoked on a
+    local object — which is exactly what LRO's CancelOperation(name) does.
+  - Composition: allOf/anyOf, thenCombine, thenCompose. Rich and much copied.
+  - StructuredTaskScope (Project Loom) is Java adopting the Kotlin/Swift model.
+    Still a preview at JDK 25 — JEP 505 "Structured Concurrency (Fifth Preview)"
+    — with a further JEP 525 sixth preview after it. JDK 25 reworked the API:
+    obtained via a static open() rather than a constructor, fork(Callable) runs
+    the subtask on a virtual thread, join() throws subtask exceptions, and
+    failure policy moved into pluggable Joiners. Six previews is itself data:
+    the committee has changed its mind about this API repeatedly, which is a
+    reason to be suspicious of anyone (including us) who thinks the ergonomics of
+    task scoping are obvious.
+  - No progress, in either API.
+
+Rust — Future, tokio::JoinHandle, cancellation by drop
+  - A Future is inert until polled, and the runtime owns polling. This is the
+    only language here where the handle-to-work relationship is inverted:
+    dropping the future IS cancellation. No cancel method needed; no cooperation
+    needed; the work simply stops being polled at its last await point.
+  - Consequences that matter to us:
+      * Cancellation is instant, guaranteed, and unobservable by the work.
+        There is no `async Drop`, so a future cancelled mid-flight cannot run
+        async cleanup. "Cancellation safety" is a documented property authors
+        must reason about per-function (tokio's select! docs are largely about
+        this). A design where cancellation cannot be caught is the opposite
+        extreme from Java's, and it is also wrong for us: an out-of-process job
+        MUST be able to run cleanup (delete the partial file, release the lock).
+      * tokio::spawn returns a JoinHandle, which detaches: dropping the
+        JoinHandle does NOT cancel the task, unlike dropping the future. You
+        must call abort() (or AbortHandle::abort), which cancels at the next
+        await point. JoinError distinguishes is_cancelled() from is_panic().
+        This is the closest Group A comes to "the handle and the work have
+        independent lifetimes", and note it required a distinct type to express.
+      * tokio_util::sync::CancellationToken re-imports the C# design because
+        drop-cancellation is not enough once you have spawned tasks.
+  - Composition: futures::join!/try_join!, tokio::select!, JoinSet. No progress.
+
+Go — and there is no future type, which is the point
+  - Go has no Future, Promise, Task, or Deferred in its standard library, by
+    design. The idioms are: a goroutine plus a channel; sync.WaitGroup;
+    golang.org/x/sync/errgroup (Go, Wait, and since v0.6-ish SetLimit and
+    TryGo), which returns the FIRST non-nil error and cancels a derived context.
+  - context.Context is the cancellation and deadline carrier: Done() <-chan
+    struct{}, Err(), Deadline(), Value(). Extensions: WithCancelCause + Cause
+    (Go 1.20), AfterFunc + WithoutCancel + WithDeadlineCause/WithTimeoutCause
+    (Go 1.21). (Source: go.dev/doc/go1.20 and go1.21 release notes.)
+    context is the C# CancellationToken idea with a value bag stapled on.
+  - THIS IS DIRECTLY CONSEQUENTIAL because this project is written in Go. There
+    is no ambient expectation to satisfy, no `Task<T>` shape users will demand
+    the facade conform to, and no temptation to make the handle a live object
+    with methods that secretly close over runtime state. Go pushes you toward
+    exactly the right answer: a job id value, a store, functions that take a
+    context. Go's *absence* of a future type is an advantage here, and any Go
+    API that returns a `<-chan Result` for a job that lives in another process
+    would be an error — a channel cannot be persisted, enumerated, or reopened
+    after a crash.
+  - The one thing Go lacks that we must supply: context cancellation stops at
+    the process boundary. `ctx.Done()` firing must be translated into a
+    Cancel(jobID) RPC by the binding; it cannot propagate by itself.
+  - No progress. Also no standard way to say "this operation is 40% done"
+    anywhere in the Go standard library.
+
+JavaScript — Promise + AbortController
+  - Promise: eager, single-shot, no cancellation whatsoever, no progress. The
+    original Promises/A+ design deliberately omitted both; a proposal for
+    cancellable promises was withdrawn in 2016.
+  - AbortController/AbortSignal (WHATWG DOM, also in Node) is a SEPARATE object
+    passed as an argument — the C# split again: controller.abort(reason) is the
+    trigger, signal is the read-only observer, signal.addEventListener('abort'),
+    signal.throwIfAborted(). AbortSignal.timeout() and AbortSignal.any() compose
+    them. The convention is that cancellation rejects the promise with an
+    AbortError DOMException.
+  - Composition: Promise.all / allSettled / race / any. `allSettled` is the one
+    worth noting — it is the only widely used combinator that reports per-child
+    outcome rather than collapsing to first-failure, which is what a job tree
+    with partial failures actually needs (compare LRO metadata's "partial
+    failures", and K8s Job's succeeded/failed counts).
+  - Progress: none. The old XMLHttpRequest had onprogress; fetch removed it and
+    the replacement is to read the response body as a ReadableStream and count
+    bytes yourself — i.e. the web platform CONSCIOUSLY MOVED AWAY from a progress
+    callback toward "you count what passes through you". That is the same
+    conclusion research/transfer/SUMMARY.txt reached about SMB ("you count your
+    own bytes, which is the correct answer").
+
+Python — asyncio.Task / Future, and concurrent.futures
+  - asyncio.Task.cancel() throws CancelledError into the coroutine at its next
+    await; the coroutine may catch it (and, badly, swallow it). Python 3.11
+    added cancelling()/uncancel() precisely to let nested cancellation scopes
+    tell "someone above me cancelled" from "I cancelled my own child" — a real
+    problem that appears the moment cancellation composes. 3.11 also added
+    TaskGroup (structured concurrency) and asyncio.timeout.
+  - concurrent.futures.Future is the important one for us because it is the only
+    Group A primitive that spans processes at all (ProcessPoolExecutor). And it
+    is a demonstration of the limits: Future.cancel() returns False and does
+    nothing if the work has already started, because there is no mechanism to
+    interrupt a worker process; only queued items can be cancelled. A handle to
+    work in another process, with no cancellation and no progress — this is what
+    you get if you take the in-process design and naively stretch it across a
+    process boundary. It is the naive answer, it exists, and it is inadequate.
+  - Exceptions are re-raised on result(). Progress: none.
+
+Swift — structured concurrency
+  - Task, async let, TaskGroup / ThrowingTaskGroup, actors. Cancellation is
+    cooperative and inherited by the task tree: Task.isCancelled,
+    Task.checkCancellation() (throws CancellationError), and
+    withTaskCancellationHandler for immediate reaction. A cancelled Swift task
+    keeps running until it checks — same model as Kotlin.
+  - Notable: cancellation is a FLAG ON THE TASK, and the tree propagates it
+    automatically to child tasks; a detached Task deliberately opts out of the
+    tree. Same shape as Kotlin's Job/SupervisorJob.
+  - No progress in Swift Concurrency. Foundation's Progress (NSProgress) is the
+    separate answer, and it is the most interesting one in Group A for our
+    purposes: Progress supports implicit parent/child composition
+    (totalUnitCount / pendingUnitCount), cancellation and pause handlers, AND —
+    on macOS — CROSS-PROCESS OBSERVATION via publish()/
+    addSubscriber(forFileURL:withPublishingHandler:), plus NSXPCConnection
+    integration for progress across an XPC boundary. (Sources: Apple Foundation
+    docs; oleb.net "NSProgress", 2014-03; Foundation release notes for macOS
+    10.13 note NSXPCConnection support for discrete NSProgress. Fetched
+    2026-08-19.)
+    So: exactly one mainstream platform shipped a cross-process progress
+    protocol, in 2014, keyed by file URL, and it is Apple-only and largely
+    unused outside Finder-style copy UIs. That is both an existence proof and a
+    warning about adoption.
+
+---------------------------------------------------------------------------
+3. PROGRESS: THE HOLE IN ALL OF THEM
+---------------------------------------------------------------------------
+  Stated plainly, because the brief asks for it: SIX OF THE EIGHT HAVE NO
+  PROGRESS CONCEPT AT ALL — Kotlin, Java (both APIs), Rust, Go, JavaScript,
+  Python. Not "weak"; absent.
+
+  The two that have something have it OUTSIDE the task type:
+    - C#: IProgress<T> / Progress<T>, a caller-supplied callback sink, marshalled
+      to the captured SynchronizationContext. Bound to the caller's lifetime.
+    - Swift/Obj-C: Foundation Progress, a separate tree of objects, with the
+      cross-process publish/subscribe mechanism noted above.
+  And one ABI has it in the type: WinRT's *WithProgress interfaces.
+
+  Why they all omit it, and this is worth taking seriously rather than treating
+  as an oversight: progress is not part of the *contract* of a computation. It is
+  telemetry. It is not monotonic in general, its unit is domain-specific, its
+  cost is nonzero, and a function that returns a value has no obligation to
+  narrate. For an in-process future, adding it would tax every user for the
+  benefit of a few.
+
+  The reason it is unavoidable for US is that the caller cannot see the work at
+  all. In-process, if you want to know what a computation is doing you can
+  instrument it, profile it, or read its code. Across a process boundary with a
+  swappable implementation, the ONLY thing the caller can ever know is what the
+  record says. Progress is not a convenience here; it is the entire observability
+  surface, and METHOD §2 makes that the reason the boundary exists at all.
+
+  Design consequence, from the evidence: standardise a MINIMAL, EXPLICITLY
+  BEST-EFFORT progress triple in the record, and put everything richer in the
+  opaque blob. The failures to avoid are visible in the survey — WorkManager
+  discards progress at terminal state (so it cannot be used for audit),
+  C#/IProgress ties it to a live caller (so a crash loses it), and LRO refuses to
+  standardise any field (so no generic client can render it).
+
+---------------------------------------------------------------------------
+4. CANCELLATION: COOPERATIVE OR FORCED?
+---------------------------------------------------------------------------
+  COOPERATIVE, EVERYWHERE, WITHOUT EXCEPTION — C#, Kotlin, Java (both), Go,
+  JS, Python asyncio, Swift. The two apparent exceptions prove the rule:
+    - Rust drop-cancellation is not forced cancellation of running code; it is
+      the runtime declining to poll again. It cannot interrupt a blocking
+      section either, and it forfeits async cleanup.
+    - Java's CompletableFuture.cancel is not cancellation at all; it abandons
+      the handle and leaves the work running.
+  Forced cancellation was tried and withdrawn: Thread.stop deprecated in Java
+  1.2, Thread.Abort removed in .NET Core. The industry has a settled answer and
+  it is "you may ask; you may not compel".
+
+  Two structural variants exist and the difference is real:
+    - CANCEL THE HANDLE (Java CF, tokio JoinHandle::abort) — the handle is the
+      addressee.
+    - CANCEL VIA A SEPARATE CAPABILITY (C# CancellationToken, Go context,
+      JS AbortSignal, tokio_util CancellationToken) — the trigger is a distinct
+      object that can be shared, linked, and handed to code that must not be able
+      to cancel. Three independent language communities converged on this after
+      shipping the first variant. That convergence is worth respecting.
+
+  For an out-of-process job the second variant degenerates: there is nothing to
+  hand down, because the work is not in your address space. What replaces it is
+  cancellation-by-identity — Cancel(jobID) routed to whoever is executing —
+  plus, on the executor side, a local CancellationToken/context that the
+  executor derives from the incoming request. So the interface has ONE cancel
+  verb taking an id, and each binding wires it to its native mechanism. And per
+  LRO and every distributed system in Group B: it is a best-effort REQUEST whose
+  outcome is observed by re-reading the record, never a synchronous guarantee.
+
+---------------------------------------------------------------------------
+5. VERDICT — WHAT GROUP A CONTRIBUTES
+---------------------------------------------------------------------------
+  Best in-process design overall: C#'s, but for the CancellationToken split
+  rather than for Task. The claim that Task is "the most complete design" holds
+  only within the in-process frame; Task's completeness is in its state enum and
+  its combinators, and both are the least transferable parts. Kotlin's Job tree
+  is a better *model* and Rust's drop-cancellation is a better *mechanism* for
+  the problems each solves.
+
+  Three things to steal from Group A, and only three:
+    1. C#/Go/JS: separate the cancellation TRIGGER from the cancellation
+       OBSERVER. Across processes this becomes: cancel by id at the interface,
+       native token inside each implementation.
+    2. Kotlin/Swift: the parent/child job tree with cancel-down / fail-up, and
+       an explicit escape hatch (SupervisorJob, detached Task) for the edges you
+       do not want to propagate. Our record needs a `parent` field and a stated
+       propagation rule; the app -> service -> NAS chain is a tree already.
+    3. C# TaskStatus and Rust's JoinError: keep CANCELLED distinct from FAILED
+       as terminal states. LRO does not (cancellation surfaces as an error) and
+       that loses information every operator wants at 3am.
+
+  One thing to steal from adjacent-to-Group-A prior art, and it is the most
+  valuable item on this page: WinRT's *WithProgress interfaces plus IAsyncInfo's
+  `Id` — the only shipped cross-language async ABI that put progress in the type
+  and an identity on the handle. Study it before designing ours.
+
+  And the thing NOT to do: do not model the interface on `Future<T>`. Section 2's
+  Python concurrent.futures entry is what that produces when stretched across a
+  process boundary — a handle that cannot cancel started work, cannot report
+  progress, cannot be re-obtained after a crash, and cannot be enumerated. The
+  detailed indictment is in SUMMARY.txt.

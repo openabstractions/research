@@ -1,0 +1,23 @@
+Dify
+=========
+
+CATEGORY: workflow/orchestration
+LICENSE: Dify Open Source License (modified Apache 2.0, not OSI-approved)
+
+WHAT IT IS
+  Open-source LLM app platform: visual AI workflows, RAG pipelines, agents, model management, and observability, deployed cloud/self-hosted/VPC.
+
+ARCHITECTURE / SEAMS
+  Workflow abstraction is a visual DAG of typed nodes (LLM, knowledge retrieval, code, HTTP, tools, branches, iterations) run by an internal graph engine. Model layer is a uniform adapter system over hundreds of providers; tools/plugins are standardized and sandboxed via a Go agent runtime. Clean in the provider abstraction and RAG node pipeline; leaky in the large Flask+Celery+web service monolith with the graph engine embedded.
+
+STINKS
+  - License is the biggest red flag: multi-tenant + logo restrictions mean commercial/fork use may need paid license; terms changeable unilaterally.
+  - Self-hosting is heavy (many services: API, worker, web, Redis, Postgres, vector DB, sandbox).
+  - Workflow canvas weaker than code frameworks (LangGraph) for complex control flow; rapid API churn.
+
+DONE GREAT
+  - Clean separation of concerns: uniform model-provider adapters, standardized tools/plugins, typed node DAG.
+  - Strong RAG pipeline (ingest/chunk/embed/retrieve/cite) and LLMOps observability built in.
+
+ABSTRACTION ANGLE
+  Alongside Flowise, the cleanest visual LLM-workflow abstraction: providers as uniform adapters, tools/plugins standardized, workflow as typed node DAG. The provider-adapter and node-DAG layers are worth absorbing; the graph engine is embedded in a service monolith, so the abstraction isn't extractable as-is — but its provider-interface and node-type taxonomy are directly reusable.

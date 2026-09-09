@@ -1,0 +1,64 @@
+NAME
+ComfyUI
+
+CATEGORY
+creative/generation
+
+OFFICIAL SITE
+https://www.comfy.org/
+
+GITHUB REPO
+https://github.com/Comfy-Org/ComfyUI (canonical org; originally comfyanonymous/ComfyUI — still redirects)
+Frontend: https://github.com/Comfy-Org/ComfyUI_frontend
+Manager: https://github.com/Comfy-Org/ComfyUI-Manager
+
+LICENSE
+GPL-3.0 (repo LICENSE file). Core is GPL; Comfy-Org has clarified the license scope but the repo is GPL-3.0. Partner/API nodes are a separate paid/commercial layer.
+
+WHAT IT DOES
+Node-graph based GUI + backend + API for running diffusion/generative models. The de-facto standard "modular AI engine" for visual professionals: image, video, audio, 3D, and text generation.
+
+TECHNICAL ARCHITECTURE
+- Python (PyTorch) backend; TypeScript/Vue frontend compiled into a separate package (comfyui-frontend-package).
+- Core model: a directed acyclic graph of "nodes". Each node declares typed INPUT_TYPES / OUTPUT_NODE; the engine wires data through typed ports.
+- Execution engine in comfy_execution/ + execution.py: asynchronous queue, caching, and PARTIAL re-execution (only changed/dirty subgraphs run). Smart VRAM/RAM management with model offloading.
+- Nodes compose into reusable subgraphs (Groups), saved/loaded as JSON "workflows". Workflows are fully portable; generated media can embed the whole workflow + seed.
+- Runs local GPU (NVIDIA CUDA, AMD ROCm, Intel XPU, Apple Silicon/MPS, Ascend NPU, Cambricon MLU) or Comfy Cloud.
+
+MODEL FORMAT / ENGINES SUPPORTED
+- Formats: ckpt / safetensors checkpoints, split diffusion models (UNet + VAE + text encoders separately), diffusers-format, GGUF quantized, LoRA/LyCORIS, ControlNet, adapters, embeddings, upscalers.
+- Engines: PyTorch only (no TensorFlow/ONNX runtime in core).
+- Representative models: SD1.5/SDXL/SD3.5, Flux.1/2 (Kontext/Fill/Klein), Qwen Image, Z-Image, Hunyuan Image, Wan 2.x, LTX-Video 2.x, HunyuanVideo, CogVideoX, Stable Audio 3, Hunyuan3D, SAM, Gemma/Qwen text models (via nodes).
+
+API / PROTOCOLS IT SPEAKS
+- HTTP REST + WebSocket backend API; OpenAPI spec shipped (openapi.yaml).
+- /prompt submit queue, /history, /view, upload endpoints; WebSocket for progress/status/preview streaming.
+- Exposed in production via "API endpoints"; SDKs (comfy-cli, comfyui python packages) wrap the REST API.
+
+KEY FEATURES
+- Visual node graph (no code) + quick-search palette.
+- Custom nodes ecosystem (thousands) managed via ComfyUI-Manager.
+- Reusable subgraphs / Groups, workflow templates, "App Mode" (collapse a complex workflow into a simple end-user UI).
+- JSON workflow serialization; workflow recovery from generated PNG metadata (seed + graph).
+- Built-in tools: inpainting/outpainting, masks/compositing, model merging, upscaling, frame interpolation, segmentation, depth estimation.
+- Runs fully offline (--disable-api-nodes flag); optional paid "Comfy API nodes" for closed models (Nano Banana, Seedance, Hunyuan3D, etc.).
+- Quantized model support (QUANTIZATION.md).
+
+TOOL CALLING / MCP SUPPORT
+- No native MCP in core; MCP is community/third-party (e.g. ComfyUI-MCP servers that expose workflows/tools to agents).
+- Not an agent framework — it is the generation engine that agents/other orchestrators call via REST.
+- "API nodes" allow the graph itself to call external/closed model APIs (tool-like), but that is not MCP.
+
+MULTIMODAL SUPPORT
+Extensive and native: image generation + editing, video generation (Wan, LTX, HunyuanVideo, CogVideoX, Mochi), audio generation (Stable Audio 3, ACE-Step), audio+video (MiniMax H3, LTX-AV), 3D (Hunyuan3D, TripoSplat), plus vision/segmentation/depth models. One graph can mix modalities.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS
+- GPL-3.0: concerns about licensing of custom nodes/derivative works (community debate; Comfy-Org has tried to clarify but friction remains).
+- Breaking-change churn: weekly releases; custom nodes frequently break between versions; version pinning is painful.
+- Dependency hell: each custom node can pull its own conflicting torch/numpy/cuda deps.
+- Supply-chain security: custom nodes run arbitrary Python; multiple malware incidents (malicious nodes stealing secrets/keys).
+- Steep learning curve for non-technical users vs. form-based UIs; graph gets unmanageably large for complex projects.
+- VRAM-hungry; heavy for large models without offloading expertise.
+
+ABSTRACTION HINTS
+The canonical node-graph abstraction in the generative space. Every model/operation is a node with typed input/output ports, and the graph is JSON — this standardizes components better than any peer. Clean points: the execution engine (lazy partial re-execution, caching) and the node typing system. Monolith points: core is still a single repo where node definitions, model loaders, and UI concerns intermingle; extension mechanism (custom_nodes as raw Python imports) is powerful but unsandboxed and version-fragile.

@@ -1,0 +1,229 @@
+TRANSFER IMPLEMENTATION SURVEY — SUMMARY
+========================================
+
+SCOPE: candidate implementations (bindings) for a universal download abstraction
+moving 0.4–40 GB model weights. Six technologies profiled in this directory.
+ADDED: 2026-08-18. All facts sourced in the individual profiles.
+
+TABLE 1 — SURVIVAL FIRST
+  Does the transfer keep going / stay recoverable when the world interferes?
+
+                  PROC   NET    USER    SLEEP /      REBOOT   UNIT OF     ANOTHER
+                  EXIT   LOSS   LOGOFF  HIBERNATE             WORK        PROC?
+  BITS            YES    YES    susp+   Modern       yes      job + GUID  YES
+                                auto-   Standby      (see             (TakeOwner-
+                                resume  only [1]     [2])             ship)
+  aria2 (daemon)  no     YES    n/a     no [3]       no       GID (RPC)   yes, via
+                                                                         RPC add
+  curl/libcurl    no     retry  n/a     no           no       a call      no
+                         only
+  hf_xet / HF     no     part-  n/a     NO — the     no       a call      no
+                         ial          documented bug
+                                     case [4]
+  libtorrent      no,    YES    n/a     yes, state   no,      info-hash   yes, by
+                  state              survives      state    (global!)   magnet
+                  survives                          survives
+  rsync           no     no     n/a     no           no       a process   no
+  SMB (as fs)     n/a    re-    n/a     reopen +     n/a      file handle you build
+                         open           seek                  + offset    it
+
+  [1] "Starting with the Windows 10 May 2019 Update, BITS will transfer files
+      when the machine is in Modern Standby mode and the machine is plugged in."
+      S3/S4 behaviour is NOT documented by Microsoft. UNVERIFIED; test it.
+  [2] Reboot survival is universally relied on and mechanically supported by the
+      on-disk queue (qmgr.db) and the 90-day JobInactivityTimeout, but Microsoft
+      never states it in one sentence. UNVERIFIED by us; test it.
+  [3] aria2 writes a `.aria2` piece bitfield every 60s (--auto-save-interval) and
+      an optional --save-session file. State survives; the process does not, and
+      nothing relaunches it.
+  [4] huggingface_hub #4196 (2026-05-06): 16.9 GB download at 3.46 GB restarted
+      from ~404 MB after a system suspend. `resume_download` was removed from the
+      public API in v1.0.
+
+TABLE 2 — RESUME, INTEGRITY, LICENCE, GO
+
+                  RESUME GRANULARITY   VERIFIES  INTEGRITY   LICENCE   GO ROUTE
+                                       THE
+                                       RESUME?
+  BITS            byte range (HTTP/    size +    NONE        Windows,  go-ole COM
+                  SMB), server must    mtime     (hook via   in-box,   (no CGO),
+                  send Content-Range   only      SetValida-  no        or PS
+                                                 tionState)  exposure  subprocess
+  aria2           piece bitfield,      only if   optional,   GPL-2.0+  subprocess
+                  multi-connection     given a   caller-     *** HARD  + JSON-RPC
+                  safe                digest    supplied    NO ***
+  curl/libcurl    single byte offset   NO        NONE        curl      don't —
+                  (_LARGE past 2 GB!)                        (MIT-ish) use
+                                                             GREEN     net/http
+  hf_xet          chunk (CDC ~64 KiB,  by CAS    Blake3      Apache-2  reimplement
+                  GearHash) — in       lookup    Merkle      GREEN     Hub HTTP,
+                  theory; see [4]                per chunk             or FFI
+  libtorrent      piece, always        ALWAYS    SHA-1 (v1)  BSD-3     anacrolix/
+                  hash-verified                  SHA-256     GREEN     torrent is
+                                                 Merkle (v2)  (but see MPL-2.0 —
+                                                              below)   fails bar
+  rsync           --append-verify      YES (that xxh128/     GPL-3.0   subprocess
+                  (append + prove      is the    xxh64/md5,  *** HARD  only
+                  prefix)              point)    every file  NO ***
+  openrsync       as rsync, partial    yes       as rsync    ISC       subprocess
+                  feature coverage                           GREEN
+  SMB             seek + read —        n/a       NONE        n/a       os.Open on
+                  trivially resumable                                  UNC (Win),
+                  by construction                                      go-smb2
+                                                                       (BSD-2)
+
+  PROGRESS, ranked by usefulness to a facade:
+    aria2       JSON-RPC tellStatus + WebSocket push notifications.  Best.
+    BITS        GetProgress polling from ANY process by GUID, plus a COM callback
+                and SetNotifyCmdLine (runs a program on completion even if you
+                are gone). Best out-of-process story.
+    libtorrent  in-process alert queue + torrent_status. No RPC (every off-the-
+                shelf RPC front end — qBittorrent, Transmission, Deluge — is GPL).
+    curl        CURLOPT_XFERINFOFUNCTION, in-process only.
+    hf_xet      tqdm bars in the calling Python process. Nothing else.
+    rsync       screen-scrape --info=progress2 off a pipe. Worst.
+    SMB         you count your own bytes, which is the correct answer.
+
+  COPYLEFT FLAGS, explicitly:
+    aria2                GPL-2.0-or-later (+ OpenSSL exception)   HARD NO
+    rsync 3.x            GPL-3.0                                  HARD NO
+    anacrolix/torrent    MPL-2.0 (weak, file-level)               FAILS THE BAR
+    Transmission/qBit/   GPL-2.0 / GPL-2.0+ / GPL-3.0             HARD NO
+      Deluge RPC servers
+    Everything else here — BITS (proprietary, not linked), curl, huggingface_hub
+    / hf_transfer / xet-core (Apache-2.0), libtorrent (BSD-3), openrsync (ISC),
+    go-smb2 (BSD-2), go-ole (MIT) — is clean.
+
+RECOMMENDATION
+
+  (a) WINDOWS SYSTEM SERVICE  →  ADOPT BITS. Do not write this.
+      This is the only unambiguous "wrap it" in the survey. BITS already provides
+      persistent on-disk jobs, a cross-process GUID handle, documented
+      ownership transfer (TakeOwnership / Get-BitsTransfer -AllUsers),
+      auto-resume on logon and on network recovery, priority scheduling,
+      bandwidth and cost policy, out-of-process progress polling, an
+      out-of-process completion hook, and it speaks HTTP, HTTPS *and SMB* in the
+      same job — so on Windows this binding covers the NAS case too. It is
+      in-box, free, and carries no licence exposure. Reimplementing it would mean
+      writing a Windows service with an on-disk queue, which is months of work to
+      arrive at something worse.
+      What you must add on top: content integrity (BITS verifies size and
+      timestamp only) and dynamic/redirecting URL handling (BITS requires static
+      content whose GET honours Content-Range — the interaction with expiring
+      signed CDN URLs is UNTESTED and is the largest single risk in this plan).
+      Drive it with github.com/go-ole/go-ole (MIT, syscall-based, no CGO), hand-
+      writing the vtable calls. Do not mistake github.com/vb4life/gobits for a
+      client — it is a BITS *upload server*.
+
+  (b) CONSOLE WRAPPER  →  WRITE IT. Honestly: write it.
+      Neither candidate survives scrutiny. aria2 is GPL-2.0, which is a hard
+      no even at subprocess distance for a shipped binary, and it has shipped one
+      release in roughly two years. curl is licence-clean but from Go it buys
+      nothing: net/http already gives Range requests, redirects, proxies,
+      Schannel-equivalent TLS and an io.Reader you can count and hash, with no
+      CGO and no cross-compilation tax. The console tier needs range resume, a
+      progress counter, retry, and a digest check — that is a few hundred lines
+      of stdlib Go, and every line of it is logic you have to write anyway to sit
+      above the other bindings.
+      Steal three things rather than three dependencies: aria2's GID + tellStatus
+      control-plane shape, rsync's --append-verify rule (never resume without
+      proving the prefix), and curl's CURLOPT_RESUME_FROM_LARGE lesson (there is
+      a 2 GB cliff and it compiles fine).
+
+  (c) NAS  →  WRITE IT, and it is small. Adopt nothing.
+      rsync is disqualified three times over: GPL-3.0, absent from Windows
+      without vendoring a Cygwin distribution, no job identity, and progress you
+      have to screen-scrape. Its delta algorithm is actively counterproductive on
+      single opaque 40 GB blobs. openrsync is licence-clean (ISC) but is a macOS/
+      OpenBSD tool with no Windows port we could find.
+      SMB is the right substrate precisely because it is not a transfer protocol.
+      On Windows, os.Open on a UNC path and let the redirector be the SMB client:
+      seek + read is trivially resumable, needs no server cooperation, and puts
+      offsets, chunking, hashing and progress in the facade where they must live
+      anyway to be shared with the other bindings. On Linux/macOS, an OS mount
+      used the same way, or github.com/hirochachacha/go-smb2 (BSD-2-Clause) /
+      the CloudSoda fork.
+      Consider skipping this binding on Windows entirely: a BITS job with an SMB
+      remote name gets you the NAS case with full persistence for free.
+
+  (d) MAGNET / PEER — not asked for, stated for completeness.
+      Defer. libtorrent itself is BSD-3 and its verify-by-construction model is
+      the best in the survey, but there is no swarm for model weights, many
+      enterprises block BitTorrent outright, joining a swarm publishes your IP
+      against a content hash, and the obvious Go client (anacrolix/torrent) is
+      MPL-2.0, which fails this project's stated bar. The useful half —
+      BEP 19 webseeds, i.e. a piece-hashed manifest satisfied from ordinary HTTP
+      mirrors — is worth building into the facade's job descriptor without taking
+      any BitTorrent dependency at all.
+
+  SO: one adoption (BITS), two "write it"s (console, NAS), and both of the
+  "write it"s are small because the hard parts — job identity, chunk map,
+  digest, progress — belong to the facade, not to any binding.
+
+WHAT A NAIVE `download(url) -> bytes` GETS WRONG
+
+  1. A JOB NEEDS AN EXTERNAL IDENTITY, NOT A RETURN VALUE.
+     BITS jobs have a GUID any process can open and an administrator can adopt.
+     aria2 downloads have a GID addressable over RPC. Torrents have an info-hash
+     that is meaningful on a different machine. A function that returns bytes to
+     its caller can express none of this, and the moment the caller dies the
+     transfer is unreachable and unresumable. The API must be at minimum
+     Submit(desc) -> JobID, Attach(JobID), List(), and JobID must be persistable
+     to disk by the caller. This is the requirement everything else hangs off.
+
+  2. COMPLETION IS TWO-PHASE, NOT A RETURN.
+     BITS will not give you the file until you call Complete(); Cancel() deletes
+     both partial AND fully transferred files; a job left unacknowledged sits in
+     the queue for 90 days. There is a real "transferred but not yet claimed"
+     state, and it exists because the transferring process and the consuming
+     process are not the same process. The interface needs an explicit
+     Acknowledge/Finalize step and a state enum that includes it. `-> bytes`
+     silently assumes the downloader and the consumer are the same stack frame.
+
+  3. THE SINK IS A PATH, NOT A BUFFER — AND IT MUST BE DECLARED UP FRONT.
+     40 GB does not fit in `bytes`, and more importantly the process that writes
+     the file may not be yours: BITS writes to a temporary file under its own
+     service account and hands it over on Complete(). The destination path must
+     be part of the job description at submission time, not an artefact of the
+     return. Callers who want a stream get an io.Reader over the finished file,
+     or a range read while it is still in flight — never a materialised buffer.
+
+  4. INTEGRITY IS AN INPUT, NOT AN OUTPUT — AND RESUME MUST PROVE ITS PREFIX.
+     BITS verifies size and timestamp only. curl verifies nothing and will exit 0
+     on a truncated body. SMB verifies nothing. aria2 and rsync verify only what
+     you tell them to (aria2) or only whole files after the fact (rsync).
+     Meanwhile the two designs built specifically for this payload class —
+     BitTorrent piece hashes and HuggingFace Xet's Blake3 chunk Merkle — both
+     converged on a content manifest as the job descriptor. So: the caller must
+     be able to supply an expected digest or a chunk manifest with the job, the
+     facade must check it, and `-C -`-style blind resume onto an unverified
+     prefix must be impossible to express. rsync's --append-verify is the rule to
+     encode: never append without checksumming what is already there.
+
+  5. CAPABILITIES DIFFER AND PROGRESS MUST BE POLLABLE FROM OUTSIDE.
+     BITS survives process exit; curl does not; hf_xet does not and does not even
+     resume. A facade that presents these as interchangeable will lie to callers
+     on the tier most users actually run. Bindings must declare capabilities
+     (survives_process_exit, has_persistent_identity, verifies_content,
+     supports_ranges, supports_delegation) and callers must be able to require
+     them. Relatedly, progress must be exposed as a pollable state readable by a
+     process that did not start the transfer — a callback binds progress to the
+     caller's lifetime, which is exactly the lifetime that fails. BITS
+     GetProgress and aria2 tellStatus both do this; curl, hf_xet and rsync do
+     not, and that is a capability difference the interface has to admit to.
+
+  Bonus, since it decides the descriptor format: the two independent systems
+  designed specifically for large versioned binary artifacts (BitTorrent v2 and
+  HF Xet) both describe a transfer as {content hash, chunk/piece list, total
+  length, one or more sources} rather than as a URL. A URL is a source, not a
+  job. If the job descriptor is a URL, delegation, multi-source, dedup across
+  model revisions, and verification all become impossible to add later.
+
+OPEN QUESTIONS THIS SURVEY COULD NOT SETTLE — MEASURE, DO NOT GUESS
+  - BITS across a real reboot, S3 sleep and S4 hibernate, with a 40 GB job.
+  - BITS against a HuggingFace/S3 signed URL that redirects and expires mid-job.
+  - Whether hf_xet enforces its file-level Merkle hash or only uses it for dedup.
+  - Whether the plain-HTTPS path to Xet-backed HF repos (HF_HUB_DISABLE_XET=1)
+    remains available long term. A Go implementation depends on it.
+  - Whether BITS is present and usable in the Windows container / minimal SKUs
+    this project may target.

@@ -1,0 +1,40 @@
+NAME: LobeChat (recently folded into "LobeHub" monorepo/product)
+
+CATEGORY: chat UI / frontend framework (extensible chatbot framework, primarily a web frontend)
+
+OFFICIAL SITE: https://lobehub.com (chat app at https://chat-preview.lobehub.com; docs https://lobehub.com/docs)
+
+GITHUB REPO: https://github.com/lobehub/lobe-chat (now redirects to https://github.com/lobehub/lobehub)
+
+LICENSE: "LobeHub Community License" — based on Apache-2.0 with extra commercial restrictions: (1a) you may use commercially unmodified; (1b) you MUST buy a commercial license to develop/distribute a DERIVATIVE work; (2) producer may tighten/loosen the license later. NOT pure Apache-2.0 despite the badge. (Changed from MIT around v1.0.)
+
+WHAT IT DOES: Open-source, extensible, high-performance chatbot web app (framework) with function-calling/plugins, agents, multimodal support, and self-hosted or Vercel deployment.
+
+TECHNICAL ARCHITECTURE:
+- Next.js (React) + TypeScript monorepo (pnpm workspaces: `apps/`, `packages/`, `src/`). Bun used for tooling.
+- Two run modes: (a) "client mode" — browser-only PWA that calls provider APIs directly (keys stored in browser/IndexedDB); (b) "server mode" — needs PostgreSQL (Drizzle ORM) for multi-user, DB-persisted chat, and server-side auth.
+- Deploys to Vercel/Zeabur/Sealos or Docker. Desktop app (`lobe-chat` desktop) wraps web.
+- Connects to providers through an internal AI provider abstraction (per-provider SDK adapters under `@lobehub/` packages).
+
+PROVIDERS / MODELS SUPPORTED: OpenAI, Anthropic Claude, Google Gemini, Mistral, DeepSeek, Ollama (local), OpenRouter, Qwen/Alibaba, 01.AI, Moonshot, Groq, plus a "custom OpenAI-compatible" endpoint. Very broad provider list.
+
+API / PROTOCOLS IT SPEAKS:
+- Consumes: OpenAI API, Anthropic API, Google API, and others via provider adapters; exposes plugin/function-calling runtime; MCP client support.
+
+KEY FEATURES: Agents (market/discovery); plugins (function calling — DALL-E, web search, etc.); Knowledge Base/RAG (files→chat); multimodal (vision, image gen, TTS/STT); PWA + mobile; i18n (dozens of languages); file/vision upload; prompt/marketplace; multi-user in server DB mode; folders/orgs; theme system (Ant Design).
+
+TOOL CALLING / MCP SUPPORT:
+- Excellent function-calling/plugin system (first-class "Function Calling" is a headline feature). MCP client support added (Model Context Protocol for connecting tools/servers).
+- DeepSeek R1 `reasoning_content` rendering has had issues (thinking tokens shown/hidden incorrectly); multiple GitHub issues for DeepSeek reasoning display.
+
+MULTIMODAL SUPPORT: Strong — vision (image understanding), image generation, TTS/STT, document/file upload.
+
+KNOWN ISSUES / COMPLAINTS / PAIN POINTS:
+- License change from MIT → LobeHub Community License (v1.0) is a major red flag / controversy: derivative commercial forks now require a paid license; community raised concern. See LICENSE in repo.
+- Fast-moving rename/scope shift (LobeChat → LobeHub "agent operator"); repo churn and API instability.
+- Server mode requires PostgreSQL; client mode is stateless so multi-user/team features need the DB path.
+- Heavy frontend (Next.js/Ant Design); large bundle; some feature gaps vs OpenAI-native (artifact/response API fidelity).
+
+ABSTRACTION HINTS:
+- Cleanest seams: (1) `packages/` split (core chat logic, provider/llm adapters, plugins, UI kits); (2) the AI provider abstraction layer (a unified model interface over OpenAI/Anthropic/Google/etc.) is a ready-made adapter seam; (3) plugin manifest/runtime (function-calling tools) as extensibility boundary; (4) client-mode vs server-mode split (a clear "frontend vs backend" seam that can be re-implemented).
+- Monolith seams: Next.js app couples API routes, auth, DB access, and rendering; provider logic scattered across packages.
